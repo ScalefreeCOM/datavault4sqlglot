@@ -1,8 +1,10 @@
 from datavault4sqlglot.generators.stage import StageGenerator
-from datavault4sqlglot.metadata.stage import StageSource
+from datavault4sqlglot.metadata import StageSource
 
 source = StageSource(
-    source_model="raw.orders",
+    database="RAW_DB",
+    schema="RAW_SCHEMA",
+    table_name="ORDERS",
     hashed_columns={
         "hk_order_id": ["order_id", "customer_id"],
         "hk_customer_id": ["customer_id"]

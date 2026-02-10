@@ -1,10 +1,10 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import sqlglot
 from sqlglot import exp
 
 from datavault4sqlglot.generators.base import BaseGenerator
-from datavault4sqlglot.metadata.source import SourceTable
+from datavault4sqlglot.metadata import SourceTable
 
 
 class HubGenerator(BaseGenerator):
@@ -14,13 +14,15 @@ class HubGenerator(BaseGenerator):
 
     def __init__(
         self, 
-        target_table_name: str, 
+        target_table: str, 
         source_models: List[SourceTable], 
+        target_schema: Optional[str] = None, 
+        target_database: Optional[str] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
         end_of_all_times: str = "9999-12-31"
     ):
-        super().__init__(target_table_name)
+        super().__init__(target_table, target_schema, target_database)
         self.source_models = source_models
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
@@ -33,6 +35,9 @@ class HubGenerator(BaseGenerator):
         ldts_col = "load_date"
         rsrc_col = "record_source"
         
+        # Helper for target table
+        target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
+
         # ---------------------------------------------------------
         # 1. HWM Logic
         # ---------------------------------------------------------
@@ -52,7 +57,7 @@ class HubGenerator(BaseGenerator):
                                 exp.func("MAX", exp.column(ldts_col)).as_("max_ldts"),
                                 exp.Literal.string(static_val).as_("rsrc_static")
                             )
-                            .from_(self.target_table_name)
+                            .from_(target_exp)
                             .where(exp.column(rsrc_col).like(static_val))
                             .where(f"{ldts_col} != '{self.end_of_all_times}'")
                         )
@@ -72,7 +77,7 @@ class HubGenerator(BaseGenerator):
         
         for idx, src in enumerate(self.source_models):
             src_id = str(idx) # Use index for unique source naming
-            src_name = src.name
+            src_table_exp = self._get_table_expression(src.table_name, src.schema_name, src.database)
             bk_columns = src.business_keys
             statics = src.rsrc_statics or []
             
@@ -91,7 +96,7 @@ class HubGenerator(BaseGenerator):
             select_expressions.append(exp.column(src.load_date_col).as_(ldts_col))
             select_expressions.append(exp.column(src.record_source_col).as_(rsrc_col))
 
-            src_query = exp.select(*select_expressions).from_(src_name)
+            src_query = exp.select(*select_expressions).from_(src_table_exp)
 
             # 2.2 Incremental Logic
             if self.is_incremental and not self.disable_hwm:
@@ -114,7 +119,7 @@ class HubGenerator(BaseGenerator):
                  
                  elif not statics:
                      # Generic HWM
-                     subquery = exp.select(f"MAX({ldts_col})").from_(self.target_table_name)
+                     subquery = exp.select(f"MAX({ldts_col})").from_(target_exp)
                      src_query = src_query.where(exp.column(ldts_col) > subquery)
 
             cte_name = f"src_new_{src_id}"
@@ -125,10 +130,8 @@ class HubGenerator(BaseGenerator):
         # 3. Union All Sources
         # ---------------------------------------------------------
         if len(source_cte_names) > 1:
-            # We select from the first source and union the rest
             union_query = exp.select("*").from_(source_cte_names[0])
             for name in source_cte_names[1:]:
-                # Use query.union(other) which returns a Union expression
                 union_query = union_query.union(
                      exp.select("*").from_(name),
                      distinct=False
@@ -141,32 +144,40 @@ class HubGenerator(BaseGenerator):
         # ---------------------------------------------------------
         # 4. Deduplication
         # ---------------------------------------------------------
-        # Select from the last CTE name (string)
         dedup_query = exp.select("*").from_(last_cte)
         
         # ROW_NUMBER() OVER (PARTITION BY hk ORDER BY ldts)
         window_sql = f"ROW_NUMBER() OVER (PARTITION BY {hashkey_col} ORDER BY {ldts_col})"
         window_expression = sqlglot.parse_one(window_sql)
         
-        # Use qualify with exp.EQ - this is exactly what's in the original hub.py
         dedup_query = dedup_query.qualify(exp.EQ(this=window_expression, expression=exp.Literal.number(1)))
         
         ctes["earliest_hk_over_all_sources"] = dedup_query
         last_cte = "earliest_hk_over_all_sources"
 
         # ---------------------------------------------------------
-        # 5. Target Check
+        # 5. Incremental Logic: Target Check
+        # ---------------------------------------------------------
+        # 5.1 CTE: distinct_target_hashkeys
+        target_cte_name = "distinct_target_hashkeys"
+        target_select = exp.select(hashkey_col).from_(target_exp).where("1=1")
+        ctes[target_cte_name] = target_select
+        
+        # 5.2 CTE: records_to_insert
+        insert_cte_name = "records_to_insert"
+        insert_query = exp.select("*").from_(last_cte).where(
+            exp.column(hashkey_col).isin(query=exp.select("*").from_(target_cte_name)).not_()
+        )
+        ctes[insert_cte_name] = insert_query
+        last_cte = insert_cte_name
+
+        # ---------------------------------------------------------
+        # 6. Final Select
         # ---------------------------------------------------------
         final_query = exp.select("*").from_(last_cte)
 
-        if self.is_incremental:
-            target_check = exp.select(hashkey_col).from_(self.target_table_name)
-            final_query = final_query.where(
-                exp.column(hashkey_col).isin(query=target_check).not_()
-            )
-
         # ---------------------------------------------------------
-        # 6. Assemble CTEs
+        # 7. Assemble CTEs
         # ---------------------------------------------------------
         for name, expression in ctes.items():
             final_query = final_query.with_(name, as_=expression)

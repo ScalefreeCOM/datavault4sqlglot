@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import List, Union, Optional
 
 from sqlglot import exp
 from sqlglot.expressions import DataType
@@ -10,8 +10,30 @@ class BaseGenerator(ABC):
     Abstract base class for all Data Vault generators.
     """
 
-    def __init__(self, target_table_name: str):
-        self.target_table_name = target_table_name
+    def __init__(
+        self, 
+        target_table: str, 
+        target_schema: Optional[str] = None, 
+        target_database: Optional[str] = None
+    ):
+        self.target_table = target_table
+        self.target_schema = target_schema
+        self.target_database = target_database
+
+    def _get_table_expression(
+        self, 
+        table: str, 
+        schema: Optional[str] = None, 
+        database: Optional[str] = None
+    ) -> exp.Table:
+        """
+        Converts table, schema, and database strings into a sqlglot.exp.Table.
+        """
+        return exp.Table(
+            this=exp.Identifier(this=table, quoted=True),
+            db=exp.Identifier(this=schema, quoted=True) if schema else None,
+            catalog=exp.Identifier(this=database, quoted=True) if database else None
+        )
 
     @abstractmethod
     def generate_sql(self) -> exp.Expression:
@@ -38,7 +60,7 @@ class BaseGenerator(ABC):
         varchar_type = self._get_type(DataType.Type.VARCHAR, 4000)
         
         # 1. Trim and Cast
-        c = exp.Trim(this=exp.Cast(this=exp.Column(this=col_name), to=varchar_type))
+        c = exp.Trim(this=exp.Cast(this=exp.column(col_name), to=varchar_type))
         
         # 2. Escape delimiters and quotes
         # REPLACE(val, '\', '\\')
@@ -64,12 +86,11 @@ class BaseGenerator(ABC):
         num_cols = len(columns)
 
         if num_cols == 1:
-            # CONCAT(col, '') ? implied in original logic
+            # CONCAT(col, '')
             concat_block = exp.Concat(expressions=[processed_cols[0], exp.Literal.string("")])
             null_check_string = "^^"
         else:
             # CONCAT_WS('||', col, col...)
-            # sqlglot.exp.ConcatWs(expressions=[delim, col1, col2...])
             concat_block = exp.ConcatWs(
                 expressions=[exp.Literal.string("||"), *processed_cols]
             )
