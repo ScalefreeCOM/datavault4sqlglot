@@ -16,6 +16,8 @@ classifiers = [
 ]
 dependencies = [
     "sqlglot",
+    "pydantic",
+    "pytest",
 ]
 requires-python = ">=3.7"
 

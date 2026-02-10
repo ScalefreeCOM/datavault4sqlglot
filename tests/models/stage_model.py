@@ -1,5 +1,17 @@
-from datavault4sqlglot.stage import StageGenerator
-# --- Usage ---
-gen = StageGenerator("USER_SPACES.USER_MSZERENCSE.ORDERS_TPCH_SF1", db_dialect="snowflake")
-sql = gen.generate_sql({"hk_l_order_customer": ["o_orderkey", "o_custkey"], "hk_h_order": ["o_orderkey"]})
-print(sql)
+from datavault4sqlglot.generators.stage import StageGenerator
+from datavault4sqlglot.metadata.stage import StageSource
+
+source = StageSource(
+    source_model="raw.orders",
+    hashed_columns={
+        "hk_order_id": ["order_id", "customer_id"],
+        "hk_customer_id": ["customer_id"]
+    },
+    derived_columns={
+        "load_date": "CURRENT_TIMESTAMP()",
+        "record_source": "'SYSTEM'"
+    }
+)
+
+generator = StageGenerator(source_model=source)
+print(generator.generate_sql().sql(pretty=True))
