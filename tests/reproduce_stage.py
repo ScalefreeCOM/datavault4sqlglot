@@ -1,4 +1,4 @@
-from datavault4sqlglot.stage import StageGenerator
+from datavault4sqlglot.archive.stage import StageGenerator
 from sqlglot import exp
 
 gen = StageGenerator("SOURCE_TABLE", db_dialect="snowflake")

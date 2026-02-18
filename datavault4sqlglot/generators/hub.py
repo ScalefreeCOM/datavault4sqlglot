@@ -18,12 +18,14 @@ class HubGenerator(BaseGenerator):
         source_models: List[SourceTable], 
         target_schema: Optional[str] = None, 
         target_database: Optional[str] = None,
+        hashkey: str = "hash_key",
         is_incremental: bool = False,
         disable_hwm: bool = False,
         end_of_all_times: str = "9999-12-31"
     ):
         super().__init__(target_table, target_schema, target_database)
         self.source_models = source_models
+        self.hashkey = hashkey
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.end_of_all_times = end_of_all_times
@@ -31,7 +33,7 @@ class HubGenerator(BaseGenerator):
     def generate_sql(self) -> exp.Expression:
         # Configuration
         # These are target names, but could be configurable via init if needed
-        hashkey_col = "hash_key"
+        hashkey_col = self.hashkey
         ldts_col = "load_date"
         rsrc_col = "record_source"
         
