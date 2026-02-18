@@ -25,6 +25,26 @@ class SourceTable(BaseModel):
         default=None,
         description="Optional list of static values for this source (used in multi-source HWM logic)."
     )
+    
+    # Link specific
+    link_hash_key: Optional[str] = Field(
+        default=None,
+        description="The name of the hash key column in the target link."
+    )
+    foreign_hash_keys: Optional[List[str]] = Field(
+        default=None,
+        description="The names of the hash key columns from the hubs in the target link."
+    )
+    
+    # Satellite specific
+    hash_diff: Optional[str] = Field(
+        default=None,
+        description="The name of the hash diff column in the target satellite."
+    )
+    payload: Optional[List[str]] = Field(
+        default=None,
+        description="The names of the descriptive attribute columns."
+    )
 
     class Config:
         populate_by_name = True
