@@ -5,6 +5,7 @@ from sqlglot import exp
 
 from datavault4sqlglot.generators.base import BaseGenerator
 from datavault4sqlglot.metadata import SourceTable
+from datavault4sqlglot.config import config
 
 
 class SatelliteGenerator(BaseGenerator):
@@ -23,8 +24,9 @@ class SatelliteGenerator(BaseGenerator):
         payload: List[str] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
-        end_of_all_times: str = "9999-12-31"
+        end_of_all_times: Optional[str] = None
     ):
+
         super().__init__(target_table, target_schema, target_database)
         self.source_models = source_models
         self.parent_hash_key = parent_hash_key
@@ -32,14 +34,16 @@ class SatelliteGenerator(BaseGenerator):
         self.payload = payload or []
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
-        self.end_of_all_times = end_of_all_times
+        self.end_of_all_times = end_of_all_times or config.end_of_all_times
+
 
     def generate_sql(self) -> exp.Expression:
         # Configuration
         parent_hk_col = self.parent_hash_key
         hash_diff_col = self.hash_diff
-        ldts_col = "load_date"
-        rsrc_col = "record_source"
+        ldts_col = config.ldts_alias
+        rsrc_col = config.rsrc_alias
+
         
         # Helper for target table
         target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)

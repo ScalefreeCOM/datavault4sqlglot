@@ -3,6 +3,7 @@ from typing import List, Union, Optional
 
 from sqlglot import exp
 from sqlglot.expressions import DataType
+from datavault4sqlglot.config import config
 
 
 class BaseGenerator(ABC):
@@ -106,7 +107,8 @@ class BaseGenerator(ABC):
         )
         
         # MD5
-        hash_expr = exp.MD5(this=nullif_block)
+        hash_func = getattr(exp, config.hash.upper(), exp.MD5)
+        hash_expr = hash_func(this=nullif_block)
         
         # COALESCE(MD5(...), '0000...') -> Binary Hash Default
         return exp.Coalesce(this=hash_expr, expressions=[exp.Literal.string('0' * 32)])
