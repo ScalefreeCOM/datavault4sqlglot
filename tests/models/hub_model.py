@@ -1,7 +1,7 @@
 from datavault4sqlglot.generators.hub import HubGenerator
-from datavault4sqlglot.metadata import SourceTable
+from datavault4sqlglot.metadata import SourceModel
 ## metadata von stage
-source_1 = SourceTable(
+source_1 = SourceModel(
     database="DB",
     schema="Stage",
     table_name="stg_ORDERS",
@@ -10,7 +10,7 @@ source_1 = SourceTable(
     record_source_col="record_source"
 )
 
-source_2 = SourceTable(
+source_2 = SourceModel(
     database="DB",
     schema="Stage",
     table_name="stg_WEB_ORDERS",

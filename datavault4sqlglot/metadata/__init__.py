@@ -1,4 +1,3 @@
-from datavault4sqlglot.metadata.source import SourceTable
-from datavault4sqlglot.metadata.stage import StageSource
+from datavault4sqlglot.metadata.source import SourceModel
 
-__all__ = ["SourceTable", "StageSource"]
+__all__ = ["SourceModel"]

@@ -1,7 +1,7 @@
 from datavault4sqlglot.generators.stage import StageGenerator
-from datavault4sqlglot.metadata import StageSource
+from datavault4sqlglot.metadata import SourceModel
 
-source = StageSource(
+source = SourceModel(
     database="RAW_DB",
     schema="RAW_SCHEMA",
     table_name="ORDERS",

@@ -1,7 +1,7 @@
 from datavault4sqlglot.generators.link import LinkGenerator
-from datavault4sqlglot.metadata import SourceTable
+from datavault4sqlglot.metadata import SourceModel
 
-source_1 = SourceTable(
+source_1 = SourceModel(
     database="DB",
     schema="Stage",
     table_name="stg_ORDERS",

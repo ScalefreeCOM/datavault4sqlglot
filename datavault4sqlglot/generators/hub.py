@@ -4,7 +4,7 @@ import sqlglot
 from sqlglot import exp
 
 from datavault4sqlglot.generators.base import BaseGenerator
-from datavault4sqlglot.metadata import SourceTable
+from datavault4sqlglot.metadata import SourceModel
 from datavault4sqlglot.config import config
 
 
@@ -16,7 +16,7 @@ class HubGenerator(BaseGenerator):
     def __init__(
         self, 
         target_table: str, 
-        source_models: List[SourceTable], 
+        source_models: List[SourceModel], 
         target_schema: Optional[str] = None, 
         target_database: Optional[str] = None,
         hashkey: str = "hash_key",
