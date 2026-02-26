@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Any, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -75,9 +75,9 @@ class SourceModel(BaseModel):
     )
 
     # === Stage-specific enrichment ===
-    hashed_columns: Optional[dict[str, list[str]]] = Field(
+    hashed_columns: Optional[dict[str, Union[list[str], dict[str, Any]]]] = Field(
         default=None,
-        description="Dictionary mapping hash key aliases to list of source columns.",
+        description="Dictionary mapping hash key aliases to list of source columns or a config dict.",
     )
     derived_columns: Optional[dict[str, str]] = Field(
         default=None,
@@ -86,6 +86,16 @@ class SourceModel(BaseModel):
     include_source_columns: bool = Field(
         default=True,
         description="Whether to include all original source columns in the output.",
+    )
+    
+    # === Hashing overrides ===
+    case_sensitivity: Optional[bool] = Field(
+        default=None,
+        description="Global case sensitivity override for this source.",
+    )
+    use_rtrim: Optional[bool] = Field(
+        default=None,
+        description="Global rtrim behavior override for this source.",
     )
 
 

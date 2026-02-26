@@ -17,7 +17,8 @@ generator = LinkGenerator(
     target_schema="DV_SCHEMA",
     target_table="LINK_ORDER_CUSTOMER",
     link_hash_key="HK_ORDER_CUSTOMER_L",
-    source_models=[source_1]
+    source_models=[source_1],
+    is_incremental=True
 )
 
-print(generator.generate_sql().sql(pretty=True))
+print(generator.to_sql())

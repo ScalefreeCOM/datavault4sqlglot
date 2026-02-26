@@ -6,8 +6,13 @@ source = SourceModel(
     schema="RAW_SCHEMA",
     table_name="ORDERS",
     hashed_columns={
-        "hk_order_id": ["order_id", "customer_id"],
-        "hk_customer_id": ["customer_id"]
+        "hk_h_order": ["o_orderkey"],
+        "hk_h_customer": ["o_custkey"],
+        "hk_l_order_customer": ["o_orderkey", "o_custkey"],
+        "hd_order_details": {
+            "is_hashdiff": True,
+            "columns": ["o_orderstatus", "o_orderpriority", "o_shippriority"]
+        }
     },
     derived_columns={
         "load_date": "CURRENT_TIMESTAMP()",
@@ -16,4 +21,4 @@ source = SourceModel(
 )
 
 generator = StageGenerator(source_model=source)
-print(generator.generate_sql().sql(pretty=True))
+print(generator.to_sql())

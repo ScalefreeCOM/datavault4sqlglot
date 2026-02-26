@@ -19,7 +19,8 @@ generator = SatelliteGenerator(
     target_table="SAT_ORDER_DETAILS",
     parent_hash_key="HK_ORDER_H",
     hash_diff="HK_ORDER_DETAILS_D",
-    source_models=[source_1]
+    source_models=[source_1],
+    is_incremental=True
 )
 
-print(generator.generate_sql().sql(pretty=True))
+print(generator.to_sql())

@@ -19,8 +19,9 @@ class StageGenerator(BaseGenerator):
         target_table: str = "stage_view",
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
+        dialect: Optional[str] = None,
     ) -> None:
-        super().__init__(target_table, target_schema, target_database)
+        super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.source_model = source_model
 
     def generate_sql(self) -> exp.Expression:
@@ -52,8 +53,27 @@ class StageGenerator(BaseGenerator):
 
         # Hashes
         if self.source_model.hashed_columns:
-            for alias, cols in self.source_model.hashed_columns.items():
-                hash_expr = self._build_hash_expression(cols)
+            for alias, hash_config in self.source_model.hashed_columns.items():
+                if isinstance(hash_config, list):
+                    # Standard list of columns
+                    hash_expr = self._build_hash_expression(
+                        columns=hash_config,
+                        is_hashdiff=False,
+                        case_sensitivity=self.source_model.case_sensitivity,
+                        use_rtrim=self.source_model.use_rtrim,
+                    )
+                else:
+                    # Configuration dictionary
+                    hash_expr = self._build_hash_expression(
+                        columns=hash_config.get("columns", []),
+                        is_hashdiff=hash_config.get("is_hashdiff", False),
+                        case_sensitivity=hash_config.get(
+                            "case_sensitivity", self.source_model.case_sensitivity
+                        ),
+                        use_rtrim=hash_config.get(
+                            "use_rtrim", self.source_model.use_rtrim
+                        ),
+                    )
                 projection.append(
                     hash_expr.as_(exp.Identifier(this=alias, quoted=True))
                 )

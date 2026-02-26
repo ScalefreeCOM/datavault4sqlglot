@@ -15,11 +15,21 @@ class BaseGenerator(ABC):
         self, 
         target_table: str, 
         target_schema: Optional[str] = None, 
-        target_database: Optional[str] = None
+        target_database: Optional[str] = None,
+        dialect: Optional[str] = None
     ):
         self.target_table = target_table
         self.target_schema = target_schema
         self.target_database = target_database
+        self._dialect = dialect
+
+    @property
+    def dialect(self) -> str:
+        """
+        Returns the dialect to be used for SQL generation.
+        Prioritizes instance-level override, then falls back to global configuration.
+        """
+        return self._dialect or config.dialect
 
     def _get_table_expression(
         self, 
@@ -43,12 +53,30 @@ class BaseGenerator(ABC):
         """
         pass
 
-    def _hash_column(self, columns: List[str], alias: str = None) -> exp.Expression:
+    def to_sql(self, pretty: bool = True) -> str:
+        """
+        Renders the generated expression into a SQL string based on the configuration or instance dialect.
+        """
+        return self.generate_sql().sql(dialect=self.dialect, pretty=pretty)
+
+    def _hash_column(
+        self, 
+        columns: List[str], 
+        alias: str = None,
+        is_hashdiff: bool = False,
+        case_sensitivity: Optional[bool] = None,
+        use_rtrim: Optional[bool] = None
+    ) -> exp.Expression:
         """
         Generates a hash expression (MD5) for the given columns using standard DV patterns.
         Wraps _build_hash_expression for backward compatibility/aliasing.
         """
-        hash_exp = self._build_hash_expression(columns)
+        hash_exp = self._build_hash_expression(
+            columns, 
+            is_hashdiff=is_hashdiff, 
+            case_sensitivity=case_sensitivity, 
+            use_rtrim=use_rtrim
+        )
         if alias:
             return hash_exp.as_(alias)
         return hash_exp
@@ -56,39 +84,60 @@ class BaseGenerator(ABC):
     def _get_type(self, data_type: DataType.Type, length: int = None):
         return DataType.build(data_type, expressions=[exp.Literal.number(length)] if length else None)
 
-    def _clean_column(self, col_name: str):
+    def _clean_column(self, col_name: str, use_rtrim: bool = True):
         """Standard Data Vault column cleaning for hashing."""
         varchar_type = self._get_type(DataType.Type.VARCHAR, 4000)
         
-        # 1. Trim and Cast
-        c = exp.Trim(this=exp.Cast(this=exp.column(col_name), to=varchar_type))
+        # 1. Cast
+        # Use explicit Column with Identifier to ensure quoting
+        col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=True))
+        c = exp.Cast(this=col_expr, to=varchar_type)
         
-        # 2. Escape delimiters and quotes
-        # REPLACE(val, '\', '\\')
-        c = exp.func("REPLACE", c, exp.Literal.string("\\"), exp.Literal.string("\\\\"))
-        c = exp.func("REPLACE", c, exp.Literal.string('"'), exp.Literal.string('\"'))
-        c = exp.func("REPLACE", c, exp.Literal.string("^^"), exp.Literal.string("--"))
+        # 2. Trim (if enabled)
+        if use_rtrim:
+            c = exp.Trim(this=c)
         
-        # 3. Quoting: CONCAT('"', c, '"')
-        quote = exp.Literal.string('"')
+        # 3. Escape delimiters and quotes
+        c = exp.Replace(this=c, expression=exp.Literal.string(r"\\"), replacement=exp.Literal.string(r"\\\\"))
+        c = exp.Replace(this=c, expression=exp.Literal.string(r'"'), replacement=exp.Literal.string(r'\"'))
+        c = exp.Replace(this=c, expression=exp.Literal.string("^^"), replacement=exp.Literal.string("--"))
+        
+        # 4. Quoting: CONCAT('\"', c, '\"')
+        quote = exp.Literal.string(r'\"')
         quoted_col = exp.Concat(expressions=[quote, c, quote])
         
-        # 4. Handle Nulls with Ghost Record '^^'
-        return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
+        # 5. Handle Nulls with Ghost Record '^^'
+        return exp.Nullif(this=quoted_col, expression=exp.Literal.string("^^"))
 
-    def _build_hash_expression(self, columns: list) -> exp.Expression:
+    def _build_hash_expression(
+        self, 
+        columns: list[str],
+        is_hashdiff: bool = False,
+        case_sensitivity: Optional[bool] = None,
+        use_rtrim: Optional[bool] = None
+    ) -> exp.Expression:
         """
         Constructs the hash calculation expression.
         MD5(NULLIF(UPPER(CONCAT_WS('||', ...)), '^^...'))
         """
+        # Determine effective parameters based on defaults and is_hashdiff
+        if case_sensitivity is None:
+            case_sensitivity = (
+                config.hashdiff_input_case_sensitive if is_hashdiff 
+                else config.hashkey_input_case_sensitive
+            )
+        
+        if use_rtrim is None:
+            use_rtrim = config.use_trim
+
         varchar_type = self._get_type(DataType.Type.VARCHAR, 4000)
         
-        processed_cols = [self._clean_column(c) for c in columns]
+        processed_cols = [self._clean_column(c, use_rtrim=use_rtrim) for c in columns]
         num_cols = len(columns)
 
         if num_cols == 1:
             # CONCAT(col, '')
-            concat_block = exp.Concat(expressions=[processed_cols[0], exp.Literal.string("")])
+            concat_block = exp.Concat(expressions=[processed_cols[0]])
             null_check_string = "^^"
         else:
             # CONCAT_WS('||', col, col...)
@@ -97,18 +146,30 @@ class BaseGenerator(ABC):
             )
             null_check_string = "||".join(["^^"] * num_cols)
         
-        # UPPER
-        stripped = exp.Upper(this=concat_block)
+        # UPPER (if not case sensitive)
+        # Note: If case_sensitivity is False, it means we WANT to normalize to UPPER (standard DV behavior)
+        # If case_sensitivity is True, we keep it as is.
+        # UPPER (if not case sensitive)
+        if not case_sensitivity:
+            concat_block = exp.Upper(this=concat_block)
+            
+        # Remove newlines, tabs, vertical tabs, carriage returns (loop with REGEXP_REPLACE and CHR(i))
+        for char_code in [9, 10, 11, 13]:
+            concat_block = exp.RegexpReplace(
+                this=concat_block,
+                expression=exp.Chr(expressions=[exp.Literal.number(char_code)]),
+                replacement=exp.Literal.string("")
+            )
         
         # NULLIF(CAST(stripped AS VARCHAR), '^^||^^')
         nullif_block = exp.Nullif(
-             this=exp.Cast(this=stripped, to=varchar_type),
+             this=exp.Cast(this=concat_block, to=varchar_type),
              expression=exp.Literal.string(null_check_string)
         )
         
         # MD5
         hash_func = getattr(exp, config.hash.upper(), exp.MD5)
-        hash_expr = hash_func(this=nullif_block)
+        hash_expr = exp.Lower(this=hash_func(this=nullif_block))
         
-        # COALESCE(MD5(...), '0000...') -> Binary Hash Default
-        return exp.Coalesce(this=hash_expr, expressions=[exp.Literal.string('0' * 32)])
+        # NULLIF(MD5(...), '0000...') -> Binary Hash Default
+        return exp.Nullif(this=hash_expr, expression=exp.Literal.string('0' * 32))

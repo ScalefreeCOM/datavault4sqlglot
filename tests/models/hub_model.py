@@ -24,8 +24,9 @@ generator = HubGenerator(
     target_schema="DV_SCHEMA",
     target_table="HUB_ORDERS",
     hashkey="HK_ORDER_H",
-    source_models=[source_1, source_2]
+    source_models=[source_1, source_2],
+    is_incremental=True
 )
 
 
-print(generator.generate_sql().sql(pretty=True))
+print(generator.to_sql())

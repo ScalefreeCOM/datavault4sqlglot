@@ -22,10 +22,11 @@ class LinkGenerator(BaseGenerator):
         link_hash_key: str = "hash_key",
         is_incremental: bool = False,
         disable_hwm: bool = False,
-        end_of_all_times: Optional[str] = None
+        end_of_all_times: Optional[str] = None,
+        dialect: Optional[str] = None
     ):
 
-        super().__init__(target_table, target_schema, target_database)
+        super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.source_models = source_models
         self.link_hash_key = link_hash_key
         self.is_incremental = is_incremental
@@ -59,7 +60,7 @@ class LinkGenerator(BaseGenerator):
                     for static_val in statics:
                         q = (
                             exp.select(
-                                exp.func("MAX", exp.column(ldts_col)).as_("max_ldts"),
+                                exp.Max(this=exp.column(ldts_col)).as_("max_ldts"),
                                 exp.Literal.string(static_val).as_("rsrc_static")
                             )
                             .from_(target_exp)
@@ -111,7 +112,7 @@ class LinkGenerator(BaseGenerator):
                     or_conditions = []
                     for static_val in statics:
                          subquery = (
-                             exp.select("MAX(max_ldts)")
+                             exp.select(exp.Max(this=exp.column("max_ldts")))
                              .from_(hwm_cte_name)
                              .where(f"rsrc_static = '{static_val}'")
                          )
@@ -126,7 +127,7 @@ class LinkGenerator(BaseGenerator):
                  
                  elif not statics:
                      # Generic HWM
-                     subquery = exp.select(f"MAX({ldts_col})").from_(target_exp)
+                     subquery = exp.select(exp.Max(this=exp.column(ldts_col))).from_(target_exp)
                      src_query = src_query.where(exp.column(ldts_col) > subquery)
 
             cte_name = f"src_new_{src_id}"

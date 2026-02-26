@@ -13,6 +13,10 @@ class DataVaultConfig(BaseModel):
     hash: str = Field(default="MD5", description="Default hash algorithm.")
     default_unknown_rsrc: str = Field(default="SYSTEM", description="Default record source for unknown records.")
     default_error_rsrc: str = Field(default="ERROR", description="Default record source for error records.")
+    hashkey_input_case_sensitive: bool = Field(default=False, description="Default case sensitivity for hash keys.")
+    hashdiff_input_case_sensitive: bool = Field(default=True, description="Default case sensitivity for hash diffs.")
+    use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")
+    dialect: str = Field(default="snowflake", description="Target SQL dialect for generation.")
 
 # Global config instance that can be overridden
 config = DataVaultConfig()
