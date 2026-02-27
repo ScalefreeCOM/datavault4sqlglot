@@ -1,0 +1,8 @@
+{
+    "end_of_all_times": "2099-12-31",
+    "beginning_of_all_times": "1900-01-01",
+    "ldts_alias": "load_date",
+    "rsrc_alias": "record_source",
+    "hash": "SHA256",
+    "dialect": "snowflake"
+}
