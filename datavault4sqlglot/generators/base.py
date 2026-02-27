@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 from typing import List, Union, Optional
 
 from sqlglot import exp
@@ -167,9 +168,20 @@ class BaseGenerator(ABC):
              expression=exp.Literal.string(null_check_string)
         )
         
-        # MD5
-        hash_func = getattr(exp, config.hash.upper(), exp.MD5)
-        hash_expr = exp.Lower(this=hash_func(this=nullif_block))
+        # Hash Function Selection
+        hash_alg = config.hash.upper()
+        if hash_alg == "SHA256":
+            hash_expr = exp.SHA2(this=nullif_block, length=exp.Literal.number(256))
+        elif hasattr(exp, hash_alg):
+            hash_func = getattr(exp, hash_alg)
+            hash_expr = hash_func(this=nullif_block)
+        else:
+            logging.warning(f"Hash algorithm '{hash_alg}' not natively supported by sqlglot.exp. Defaulting to MD5.")
+            hash_expr = exp.MD5(this=nullif_block)
+            
+        hash_expr = exp.Lower(this=hash_expr)
         
         # NULLIF(MD5(...), '0000...') -> Binary Hash Default
-        return exp.Nullif(this=hash_expr, expression=exp.Literal.string('0' * 32))
+        # Hex length: MD5=32, SHA256=64
+        hex_len = 64 if "SHA2" in hash_alg or "SHA256" in hash_alg else 32
+        return exp.Nullif(this=hash_expr, expression=exp.Literal.string('0' * hex_len))
