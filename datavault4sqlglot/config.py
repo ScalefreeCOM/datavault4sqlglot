@@ -20,8 +20,6 @@ class DataVaultConfig(BaseModel):
     hashdiff_input_case_sensitive: bool = Field(default=True, description="Default case sensitivity for hash diffs.")
     use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")
     dialect: str = Field(default="snowflake", description="Target SQL dialect for generation.")
-    default_load_date_col: str = Field(default="LOAD_DATE", description="Default load date column name in source.")
-    default_record_source_col: str = Field(default="RECORD_SOURCE", description="Default record source column name in source.")
 
     def update_from_dict(self, data: dict):
         """Update configuration attributes from a dictionary."""

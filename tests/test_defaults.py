@@ -8,9 +8,9 @@ sys.path.append(os.path.abspath(os.path.join(os.getcwd(), ".")))
 from datavault4sqlglot import HubGenerator, SourceModel, config
 
 def test_defaults():
-    # Set custom defaults in config
-    config.default_load_date_col = "CUSTOM_LDTS"
-    config.default_record_source_col = "CUSTOM_RSRC"
+    # Set custom defaults in config (alias serves as default)
+    config.ldts_alias = "CUSTOM_LDTS"
+    config.rsrc_alias = "CUSTOM_RSRC"
     
     source = SourceModel(
         table_name="stg_orders",

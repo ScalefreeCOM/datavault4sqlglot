@@ -86,8 +86,8 @@ class LinkGenerator(BaseGenerator):
             
             # Use link_hash_key from source if provided, otherwise fallback to generator's default
             src_link_hk = src.link_hash_key if src.link_hash_key else hashkey_col
-            src_ldts = src.load_date_col or config.default_load_date_col
-            src_rsrc = src.record_source_col or config.default_record_source_col
+            src_ldts = src.load_date_col or ldts_col
+            src_rsrc = src.record_source_col or rsrc_col
             
             # Use foreign_hash_keys from source
             foreign_hks = src.foreign_hash_keys or []

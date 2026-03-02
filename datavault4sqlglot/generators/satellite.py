@@ -93,8 +93,8 @@ class SatelliteGenerator(BaseGenerator):
             src_parent_hk = src.hash_key_col if src.hash_key_col else parent_hk_col
             src_hash_diff = src.hash_diff if src.hash_diff else hash_diff_col
             src_payload = src.payload if src.payload else self.payload
-            src_ldts = src.load_date_col or config.default_load_date_col
-            src_rsrc = src.record_source_col or config.default_record_source_col
+            src_ldts = src.load_date_col or ldts_col
+            src_rsrc = src.record_source_col or rsrc_col
             
             statics = src.rsrc_statics or []
 

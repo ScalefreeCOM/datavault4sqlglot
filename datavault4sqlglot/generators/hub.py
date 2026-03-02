@@ -89,8 +89,8 @@ class HubGenerator(BaseGenerator):
             
             # Determine source HK column name (default to 'hash_key' if not set)
             src_hk = src.hash_key_col if src.hash_key_col else hashkey_col
-            src_ldts = src.load_date_col or config.default_load_date_col
-            src_rsrc = src.record_source_col or config.default_record_source_col
+            src_ldts = src.load_date_col or ldts_col
+            src_rsrc = src.record_source_col or rsrc_col
 
             # 2.1 Build Source Selection
             select_expressions = [
