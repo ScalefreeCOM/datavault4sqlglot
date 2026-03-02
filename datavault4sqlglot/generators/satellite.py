@@ -17,10 +17,10 @@ class SatelliteGenerator(BaseGenerator):
         self, 
         target_table: str, 
         source_models: List[SourceModel], 
+        parent_hash_key: str,
+        hash_diff: str,
         target_schema: Optional[str] = None, 
         target_database: Optional[str] = None,
-        parent_hash_key: str = "hash_key",
-        hash_diff: str = "hash_diff",
         payload: List[str] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
@@ -69,8 +69,8 @@ class SatelliteGenerator(BaseGenerator):
                                 exp.Literal.string(static_val).as_("rsrc_static")
                             )
                             .from_(target_exp)
-                            .where(exp.column(rsrc_col).like(static_val))
-                            .where(f"{ldts_col} != '{self.end_of_all_times}'")
+                            .where(exp.column(rsrc_col).like(exp.Literal.string(static_val)))
+                            .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
                         )
                         union_selects.append(q)
 
@@ -93,6 +93,8 @@ class SatelliteGenerator(BaseGenerator):
             src_parent_hk = src.hash_key_col if src.hash_key_col else parent_hk_col
             src_hash_diff = src.hash_diff if src.hash_diff else hash_diff_col
             src_payload = src.payload if src.payload else self.payload
+            src_ldts = src.load_date_col or config.default_load_date_col
+            src_rsrc = src.record_source_col or config.default_record_source_col
             
             statics = src.rsrc_statics or []
 
@@ -106,12 +108,12 @@ class SatelliteGenerator(BaseGenerator):
             for p in src_payload:
                 select_expressions.append(exp.column(p))
 
-            select_expressions.append(exp.column(src.load_date_col).as_(ldts_col))
-            select_expressions.append(exp.column(src.record_source_col).as_(rsrc_col))
+            select_expressions.append(exp.column(src_ldts).as_(ldts_col))
+            select_expressions.append(exp.column(src_rsrc).as_(rsrc_col))
 
             src_query = exp.select(*select_expressions).from_(src_table_exp)
 
-            # 2.2 Incremental Logic
+            # 2.2 Incremental Logic (Source Filter)
             if self.is_incremental and not self.disable_hwm:
                  if statics and hwm_cte_name in ctes:
                     or_conditions = []
@@ -119,21 +121,21 @@ class SatelliteGenerator(BaseGenerator):
                          subquery = (
                              exp.select(exp.Max(this=exp.column("max_ldts")))
                              .from_(hwm_cte_name)
-                             .where(f"rsrc_static = '{static_val}'")
+                             .where(exp.column("rsrc_static").eq(exp.Literal.string(static_val)))
                          )
-                         cond = sqlglot.and_(
-                             exp.column(rsrc_col).eq(static_val),
-                             exp.column(ldts_col) > subquery
+                         cond = exp.and_(
+                             exp.column(src_rsrc).eq(exp.Literal.string(static_val)),
+                             exp.column(src_ldts) > exp.Paren(this=subquery)
                          )
                          or_conditions.append(cond)
                     
                     if or_conditions:
-                        src_query = src_query.where(sqlglot.or_(*or_conditions))
+                        src_query = src_query.where(exp.or_(*or_conditions))
                  
                  elif not statics:
                      # Generic HWM
                      subquery = exp.select(exp.Max(this=exp.column(ldts_col))).from_(target_exp)
-                     src_query = src_query.where(exp.column(ldts_col) > subquery)
+                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
 
             cte_name = f"src_new_{src_id}"
             ctes[cte_name] = src_query
@@ -159,10 +161,14 @@ class SatelliteGenerator(BaseGenerator):
         # ---------------------------------------------------------
         dedup_query = exp.select("*").from_(last_cte)
         
-        window_sql = f"ROW_NUMBER() OVER (PARTITION BY {parent_hk_col}, {hash_diff_col} ORDER BY {ldts_col})"
-        window_expression = sqlglot.parse_one(window_sql)
+        # ROW_NUMBER() OVER (PARTITION BY hk, hd ORDER BY ldts)
+        window_expression = exp.Window(
+            this=exp.RowNumber(),
+            partition_by=[exp.column(parent_hk_col), exp.column(hash_diff_col)],
+            order=exp.Order(expressions=[exp.Ordered(this=exp.column(ldts_col))])
+        )
         
-        dedup_query = dedup_query.qualify(exp.EQ(this=window_expression, expression=exp.Literal.number(1)))
+        dedup_query = dedup_query.qualify(window_expression.eq(1))
         
         ctes["earliest_hk_over_all_sources"] = dedup_query
         last_cte = "earliest_hk_over_all_sources"
@@ -172,17 +178,19 @@ class SatelliteGenerator(BaseGenerator):
         # ---------------------------------------------------------
         if self.is_incremental:
             # 5.1 CTE: latest_records_in_target
-            # Get the latest record for each parent_hash_key from target
             latest_target_cte = "latest_records_in_target"
             
-            # Using QUALIFY for latest target record
-            window_target = f"ROW_NUMBER() OVER (PARTITION BY {parent_hk_col} ORDER BY {ldts_col} DESC)"
-            window_target_exp = sqlglot.parse_one(window_target)
+            # Use native Window expression
+            target_window = exp.Window(
+                this=exp.RowNumber(),
+                partition_by=[exp.column(parent_hk_col)],
+                order=exp.Order(expressions=[exp.Ordered(this=exp.column(ldts_col), desc=True)])
+            )
             
             target_query = (
                 exp.select(parent_hk_col, hash_diff_col)
                 .from_(target_exp)
-                .qualify(exp.EQ(this=window_target_exp, expression=exp.Literal.number(1)))
+                .qualify(target_window.eq(1))
             )
             ctes[latest_target_cte] = target_query
 
@@ -190,17 +198,19 @@ class SatelliteGenerator(BaseGenerator):
             insert_cte_name = "records_to_insert"
             
             # Join new records with latest target records
-            # Insert if target record doesn't exist OR hash_diff is different
+            src_alias = "src"
+            tgt_alias = "tgt"
+            
             insert_query = (
-                exp.select("src.*")
-                .from_(exp.alias_(exp.column(last_cte), "src"))
-                .join(exp.alias_(exp.column(latest_target_cte), "tgt"), 
-                      on=exp.column(parent_hk_col, table="src").eq(exp.column(parent_hk_col, table="tgt")),
+                exp.select(f"{src_alias}.*")
+                .from_(exp.alias_(exp.column(last_cte), src_alias))
+                .join(exp.alias_(exp.column(latest_target_cte), tgt_alias), 
+                      on=exp.column(parent_hk_col, table=src_alias).eq(exp.column(parent_hk_col, table=tgt_alias)),
                       join_type="LEFT")
                 .where(
-                    sqlglot.or_(
-                        exp.column(parent_hk_col, table="tgt").is_(exp.null()),
-                        exp.column(hash_diff_col, table="src").neq(exp.column(hash_diff_col, table="tgt"))
+                    exp.or_(
+                        exp.column(parent_hk_col, table=tgt_alias).is_(exp.null()),
+                        exp.column(hash_diff_col, table=src_alias).neq(exp.column(hash_diff_col, table=tgt_alias))
                     )
                 )
             )

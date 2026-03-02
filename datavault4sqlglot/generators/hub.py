@@ -17,9 +17,9 @@ class HubGenerator(BaseGenerator):
         self, 
         target_table: str, 
         source_models: List[SourceModel], 
+        hashkey: str,
         target_schema: Optional[str] = None, 
         target_database: Optional[str] = None,
-        hashkey: str = "hash_key",
         is_incremental: bool = False,
         disable_hwm: bool = False,
         end_of_all_times: Optional[str] = None,
@@ -41,7 +41,6 @@ class HubGenerator(BaseGenerator):
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
 
-        
         # Helper for target table
         target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
 
@@ -65,8 +64,8 @@ class HubGenerator(BaseGenerator):
                                 exp.Literal.string(static_val).as_("rsrc_static")
                             )
                             .from_(target_exp)
-                            .where(exp.column(rsrc_col).like(static_val))
-                            .where(f"{ldts_col} != '{self.end_of_all_times}'")
+                            .where(exp.column(rsrc_col).like(exp.Literal.string(static_val)))
+                            .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
                         )
                         union_selects.append(q)
 
@@ -90,6 +89,8 @@ class HubGenerator(BaseGenerator):
             
             # Determine source HK column name (default to 'hash_key' if not set)
             src_hk = src.hash_key_col if src.hash_key_col else hashkey_col
+            src_ldts = src.load_date_col or config.default_load_date_col
+            src_rsrc = src.record_source_col or config.default_record_source_col
 
             # 2.1 Build Source Selection
             select_expressions = [
@@ -100,34 +101,35 @@ class HubGenerator(BaseGenerator):
             for bk in bk_columns:
                 select_expressions.append(exp.column(bk))
 
-            select_expressions.append(exp.column(src.load_date_col).as_(ldts_col))
-            select_expressions.append(exp.column(src.record_source_col).as_(rsrc_col))
+            select_expressions.append(exp.column(src_ldts).as_(ldts_col))
+            select_expressions.append(exp.column(src_rsrc).as_(rsrc_col))
 
             src_query = exp.select(*select_expressions).from_(src_table_exp)
 
-            # 2.2 Incremental Logic
+            # 2.2 Incremental Logic (Source Filter)
             if self.is_incremental and not self.disable_hwm:
                  if statics and hwm_cte_name in ctes:
                     or_conditions = []
                     for static_val in statics:
                          subquery = (
                              exp.select(exp.Max(this=exp.column("max_ldts")))
-                             .from_(hwm_cte_name)
-                             .where(f"rsrc_static = '{static_val}'")
+                             .from_(hwm_cte_name) # Use string for CTE ref
+                             .where(exp.column("rsrc_static").eq(exp.Literal.string(static_val)))
                          )
-                         cond = sqlglot.and_(
-                             exp.column(rsrc_col).eq(static_val),
-                             exp.column(ldts_col) > subquery
+                         # IMPORTANT: Use source column names in filter, not target aliases
+                         cond = exp.and_(
+                             exp.column(src_rsrc).eq(exp.Literal.string(static_val)),
+                             exp.column(src_ldts) > exp.Paren(this=subquery)
                          )
                          or_conditions.append(cond)
                     
                     if or_conditions:
-                        src_query = src_query.where(sqlglot.or_(*or_conditions))
+                        src_query = src_query.where(exp.or_(*or_conditions))
                  
                  elif not statics:
                      # Generic HWM
                      subquery = exp.select(exp.Max(this=exp.column(ldts_col))).from_(target_exp)
-                     src_query = src_query.where(exp.column(ldts_col) > subquery)
+                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
 
             cte_name = f"src_new_{src_id}"
             ctes[cte_name] = src_query
@@ -154,10 +156,14 @@ class HubGenerator(BaseGenerator):
         dedup_query = exp.select("*").from_(last_cte)
         
         # ROW_NUMBER() OVER (PARTITION BY hk ORDER BY ldts)
-        window_sql = f"ROW_NUMBER() OVER (PARTITION BY {hashkey_col} ORDER BY {ldts_col})"
-        window_expression = sqlglot.parse_one(window_sql)
+        # Using native expressions instead of parse_one/string
+        window_expression = exp.Window(
+            this=exp.RowNumber(),
+            partition_by=[exp.column(hashkey_col)],
+            order=exp.Order(expressions=[exp.Ordered(this=exp.column(ldts_col))])
+        )
         
-        dedup_query = dedup_query.qualify(exp.EQ(this=window_expression, expression=exp.Literal.number(1)))
+        dedup_query = dedup_query.qualify(window_expression.eq(1))
         
         ctes["earliest_hk_over_all_sources"] = dedup_query
         last_cte = "earliest_hk_over_all_sources"
@@ -165,18 +171,19 @@ class HubGenerator(BaseGenerator):
         # ---------------------------------------------------------
         # 5. Incremental Logic: Target Check
         # ---------------------------------------------------------
-        # 5.1 CTE: distinct_target_hashkeys
-        target_cte_name = "distinct_target_hashkeys"
-        target_select = exp.select(hashkey_col).from_(target_exp).where("1=1")
-        ctes[target_cte_name] = target_select
-        
-        # 5.2 CTE: records_to_insert
-        insert_cte_name = "records_to_insert"
-        insert_query = exp.select("*").from_(last_cte).where(
-            exp.column(hashkey_col).isin(query=exp.select("*").from_(target_cte_name)).not_()
-        )
-        ctes[insert_cte_name] = insert_query
-        last_cte = insert_cte_name
+        if self.is_incremental:
+            # 5.1 CTE: distinct_target_hashkeys
+            target_cte_name = "distinct_target_hashkeys"
+            target_select = exp.select(hashkey_col).from_(target_exp)
+            ctes[target_cte_name] = target_select
+            
+            # 5.2 CTE: records_to_insert
+            insert_cte_name = "records_to_insert"
+            insert_query = exp.select("*").from_(last_cte).where(
+                exp.column(hashkey_col).isin(exp.select(hashkey_col).from_(target_cte_name)).not_()
+            )
+            ctes[insert_cte_name] = insert_query
+            last_cte = insert_cte_name
 
         # ---------------------------------------------------------
         # 6. Final Select
