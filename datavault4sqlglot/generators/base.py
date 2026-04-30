@@ -13,9 +13,9 @@ class BaseGenerator(ABC):
     """
 
     def __init__(
-        self, 
-        target_table: str, 
-        target_schema: Optional[str] = None, 
+        self,
+        target_table: Optional[str] = None,
+        target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         dialect: Optional[str] = None
     ):
