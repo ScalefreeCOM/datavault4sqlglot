@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class DataVaultConfig(BaseModel):
     """
-    Global configuration for Data Vault 2.0 generation parameters.
+    Global configuration for Data Vault 2 generation parameters.
     """
     end_of_all_times: str = Field(default="9999-12-31", description="Default value for 'end of all times'.")
     beginning_of_all_times: str = Field(default="0001-01-01", description="Default value for 'beginning of all times'.")
@@ -15,7 +15,7 @@ class DataVaultConfig(BaseModel):
     ledts_alias: str = Field(default="ledts", description="Alias for the load end date column.")
     hash: str = Field(default="MD5", description="Default hash algorithm.")
     hashkey_input_case_sensitive: bool = Field(default=False, description="Default case sensitivity for hash keys.")
-    hashdiff_input_case_sensitive: bool = Field(default=True, description="Default case sensitivity for hash diffs.")
+    hashdiff_input_case_sensitive: bool = Field(default=False, description="Default case sensitivity for hash diffs. False = apply UPPER (case-insensitive), True = preserve case.")
     use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")
     dialect: str = Field(default="snowflake", description="Target SQL dialect for generation.")
     quote_identifiers: bool = Field(default=True, description="Whether to quote table, schema, database, and column identifiers.")
