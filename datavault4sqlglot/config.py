@@ -18,6 +18,7 @@ class DataVaultConfig(BaseModel):
     hashdiff_input_case_sensitive: bool = Field(default=True, description="Default case sensitivity for hash diffs.")
     use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")
     dialect: str = Field(default="snowflake", description="Target SQL dialect for generation.")
+    quote_identifiers: bool = Field(default=True, description="Whether to quote table, schema, database, and column identifiers.")
 
     def update_from_dict(self, data: dict):
         """Update configuration attributes from a dictionary."""
