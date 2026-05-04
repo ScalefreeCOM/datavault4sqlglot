@@ -1,10 +1,9 @@
-from typing import List, Dict, Optional
+from typing import List, Optional
 
-import sqlglot
 from sqlglot import exp
 
 from datavault4sqlglot.generators.base import BaseGenerator
-from datavault4sqlglot.metadata import SourceModel
+from datavault4sqlglot.metadata import SourceBinding
 from datavault4sqlglot.config import config
 
 
@@ -14,24 +13,28 @@ class LinkGenerator(BaseGenerator):
     """
 
     def __init__(
-        self, 
-        target_table: str, 
-        source_models: List[SourceModel], 
+        self,
+        target_table: str,
+        sources: List[SourceBinding],
         link_hash_key: str,
-        target_schema: Optional[str] = None, 
+        target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
+        additional_columns: Optional[List[str]] = None,
         end_of_all_times: Optional[str] = None,
+        beginning_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None
     ):
 
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
-        self.source_models = source_models
+        self.sources = sources
         self.link_hash_key = link_hash_key
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
+        self.additional_columns = additional_columns or []
         self.end_of_all_times = end_of_all_times or config.end_of_all_times
+        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
 
     def generate_sql(self) -> exp.Expression:
@@ -39,6 +42,7 @@ class LinkGenerator(BaseGenerator):
         hashkey_col = self.link_hash_key
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
+        boa = self.beginning_of_all_times
 
         # Helper for target table
         target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
@@ -48,91 +52,68 @@ class LinkGenerator(BaseGenerator):
         # ---------------------------------------------------------
         hwm_cte_name = "max_ldts_per_rsrc_static_in_target"
         ctes = {}
-        union_selects = []
-        has_rsrc_static_logic = False
 
         if self.is_incremental and not self.disable_hwm:
-            for src in self.source_models:
-                statics = src.rsrc_statics or []
-                if statics:
-                    has_rsrc_static_logic = True
-                    for static_val in statics:
-                        q = (
-                            exp.select(
-                                exp.Max(this=exp.column(ldts_col)).as_("max_ldts"),
-                                exp.Literal.string(static_val).as_("rsrc_static")
-                            )
-                            .from_(target_exp)
-                            .where(exp.column(rsrc_col).like(exp.Literal.string(static_val)))
-                            .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
-                        )
-                        union_selects.append(q)
-
-            if has_rsrc_static_logic and union_selects:
-                if len(union_selects) > 1:
-                    final_hwm_query = sqlglot.union(*union_selects, distinct=False)
-                else:
-                    final_hwm_query = union_selects[0]
-                ctes[hwm_cte_name] = final_hwm_query
+            hwm_query = self._build_rsrc_static_hwm_query(
+                self.sources, target_exp, ldts_col, rsrc_col, self.end_of_all_times
+            )
+            if hwm_query is not None:
+                ctes[hwm_cte_name] = hwm_query
 
         # ---------------------------------------------------------
         # 2. Process Sources
         # ---------------------------------------------------------
         source_cte_names = []
-        
-        for idx, src in enumerate(self.source_models):
-            src_id = str(idx)
+
+        for idx, binding in enumerate(self.sources):
+            src = binding.source
             src_table_exp = self._get_table_expression(src.table_name, src.schema_name, src.database)
-            
-            # Use link_hash_key from source if provided, otherwise fallback to generator's default
-            src_link_hk = src.link_hash_key if src.link_hash_key else hashkey_col
+
+            src_link_hk = binding.hash_key_col or hashkey_col
             src_ldts = src.load_date_col or ldts_col
             src_rsrc = src.record_source_col or rsrc_col
-            
-            # Use foreign_hash_keys from source
-            foreign_hks = src.foreign_hash_keys or []
-            
-            statics = src.rsrc_statics or []
 
-            # 2.1 Build Source Selection
+            foreign_hks = binding.foreign_hash_keys or []
+            if len(foreign_hks) < 2:
+                raise ValueError(
+                    f"Source '{src.table_name}' must define at least 2 foreign_hash_keys "
+                    f"for a Link entity, got {len(foreign_hks)}."
+                )
+            extra_cols = binding.additional_columns or self.additional_columns
+            statics = binding.rsrc_statics or []
+
             select_expressions = [
-                exp.column(src_link_hk).as_(hashkey_col)
+                exp.column(src_link_hk).as_(hashkey_col),
+                *[exp.column(fhk) for fhk in foreign_hks],
+                *[exp.column(col) for col in extra_cols],
+                exp.column(src_ldts).as_(ldts_col),
+                exp.column(src_rsrc).as_(rsrc_col),
             ]
-
-            # Foreign Hash Keys
-            for fhk in foreign_hks:
-                select_expressions.append(exp.column(fhk))
-
-            select_expressions.append(exp.column(src_ldts).as_(ldts_col))
-            select_expressions.append(exp.column(src_rsrc).as_(rsrc_col))
 
             src_query = exp.select(*select_expressions).from_(src_table_exp)
 
             # 2.2 Incremental Logic (Source Filter)
             if self.is_incremental and not self.disable_hwm:
-                 if statics and hwm_cte_name in ctes:
-                    or_conditions = []
-                    for static_val in statics:
-                         subquery = (
-                             exp.select(exp.Max(this=exp.column("max_ldts")))
-                             .from_(hwm_cte_name)
-                             .where(exp.column("rsrc_static").eq(exp.Literal.string(static_val)))
-                         )
-                         cond = exp.and_(
-                             exp.column(src_rsrc).eq(exp.Literal.string(static_val)),
-                             exp.column(src_ldts) > exp.Paren(this=subquery)
-                         )
-                         or_conditions.append(cond)
-                    
-                    if or_conditions:
-                        src_query = src_query.where(exp.or_(*or_conditions))
-                 
-                 elif not statics:
-                     # Generic HWM
-                     subquery = exp.select(exp.Max(this=exp.column(ldts_col))).from_(target_exp)
-                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
+                if statics and hwm_cte_name in ctes:
+                    src_query = src_query.where(
+                        self._build_rsrc_static_or_filter(
+                            statics, src_ldts, src_rsrc, hwm_cte_name, boa
+                        )
+                    )
+                elif not statics and len(self.sources) == 1:
+                    subquery = (
+                        exp.select(
+                            exp.Coalesce(
+                                this=exp.Max(this=exp.column(ldts_col)),
+                                expressions=[exp.Literal.string(boa)],
+                            )
+                        )
+                        .from_(target_exp)
+                        .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
+                    )
+                    src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
 
-            cte_name = f"src_new_{src_id}"
+            cte_name = f"src_new_{idx}"
             ctes[cte_name] = src_query
             source_cte_names.append(cte_name)
 
@@ -143,8 +124,8 @@ class LinkGenerator(BaseGenerator):
             union_query = exp.select("*").from_(source_cte_names[0])
             for name in source_cte_names[1:]:
                 union_query = union_query.union(
-                     exp.select("*").from_(name),
-                     distinct=False
+                    exp.select("*").from_(name),
+                    distinct=False
                 )
             ctes["source_new_union"] = union_query
             last_cte = "source_new_union"

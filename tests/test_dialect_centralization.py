@@ -1,9 +1,9 @@
 from datavault4sqlglot.generators.stage import StageGenerator
-from datavault4sqlglot.metadata import SourceModel
+from datavault4sqlglot.metadata import StageModel
 from datavault4sqlglot.config import config
 
 # 1. Setup Source
-source = SourceModel(
+source = StageModel(
     table_name="orders",
     hashed_columns={"hk_order": ["order_id"]}
 )

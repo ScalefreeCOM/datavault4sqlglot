@@ -1,101 +1,111 @@
 from __future__ import annotations
 
-from typing import Optional, Any, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ColumnDefinition(BaseModel):
+    """
+    Schema definition for a single source column.
+
+    Used by StageGenerator for explicit ghost record generation.
+    The API caller provides this from their catalog / introspection result.
+    """
+
+    name: str
+    data_type: str  # e.g. "VARCHAR", "TIMESTAMP", "NUMBER(10,2)", "BOOLEAN"
+
+
 class SourceModel(BaseModel):
     """
-    Unified metadata model representing a source table and its
-    Data Vault staging configuration.
+    Physical table reference used as input to DV entity generators (Hub, Link, Sat, …).
 
-    Combines source identity, business key definitions, hashing configuration,
-    and stage-layer enrichment (derived columns, hashed columns) into a single
-    object — analogous to a dbt source + stage model.
+    Only describes WHERE to find the data and WHICH columns carry the DV pipe
+    standard columns (ldts, rsrc).  All transformation metadata (business keys,
+    hash keys, payload, …) lives on the generator or on a SourceBinding.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # === Source identity ===
-    database: Optional[str] = Field(
-        default=None, description="The database name."
-    )
-    schema_name: Optional[str] = Field(
-        default=None, alias="schema", description="The schema name."
-    )
-    table_name: str = Field(..., description="The table name.")
+    database: Optional[str] = Field(default=None)
+    schema_name: Optional[str] = Field(default=None, alias="schema")
+    table_name: str = Field(...)
 
-    # === Business key & metadata columns ===
-    business_keys: list[str] = Field(
-        default_factory=list,
-        description="List of columns to be used as business keys.",
-    )
-    load_date_col: Optional[str] = Field(
-        default=None,
-        description="Column name representing the load date/timestamp.",
-    )
-    record_source_col: Optional[str] = Field(
-        default=None,
-        description="Column name representing the record source.",
-    )
-
-    # === Hash key (for the target entity) ===
-    hash_key_col: Optional[str] = Field(
-        default=None,
-        description="Optional column name representing the hash key.",
-    )
-    source_columns: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Optional mapping of source column names to target column aliases.",
-    )
-    rsrc_statics: Optional[list[str]] = Field(
-        default=None,
-        description="Optional list of static values for this source (used in multi-source HWM logic).",
-    )
-
-    # === Link-specific ===
-    link_hash_key: Optional[str] = Field(
-        default=None,
-        description="The name of the hash key column in the target link.",
-    )
-    foreign_hash_keys: Optional[list[str]] = Field(
-        default=None,
-        description="The names of the hash key columns from the hubs in the target link.",
-    )
-
-    # === Satellite-specific ===
-    hash_diff: Optional[str] = Field(
-        default=None,
-        description="The name of the hash diff column in the target satellite.",
-    )
-    payload: Optional[list[str]] = Field(
-        default=None,
-        description="The names of the descriptive attribute columns.",
-    )
-
-    # === Stage-specific enrichment ===
-    hashed_columns: Optional[dict[str, Union[list[str], dict[str, Any]]]] = Field(
-        default=None,
-        description="Dictionary mapping hash key aliases to list of source columns or a config dict.",
-    )
-    derived_columns: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Dictionary defining derived columns (Alias -> SQL Expression).",
-    )
-    include_source_columns: bool = Field(
-        default=True,
-        description="Whether to include all original source columns in the output.",
-    )
-    
-    # === Hashing overrides ===
-    case_sensitivity: Optional[bool] = Field(
-        default=None,
-        description="Global case sensitivity override for this source.",
-    )
-    use_rtrim: Optional[bool] = Field(
-        default=None,
-        description="Global rtrim behavior override for this source.",
-    )
+    # None → generator falls back to config.ldts_alias / config.rsrc_alias
+    load_date_col: Optional[str] = Field(default=None)
+    record_source_col: Optional[str] = Field(default=None)
 
 
+class StageModel(BaseModel):
+    """
+    Metadata for a raw source table fed into StageGenerator.
+
+    Extends the physical table reference with all stage-layer concerns:
+    hashing, derived columns, schema evolution, and ghost-record support.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    database: Optional[str] = Field(default=None)
+    schema_name: Optional[str] = Field(default=None, alias="schema")
+    table_name: str = Field(...)
+
+    # Raw column names before aliasing — may differ from DV defaults
+    load_date_col: Optional[str] = Field(default=None)
+    record_source_col: Optional[str] = Field(default=None)
+
+    # Hash column definitions
+    hashed_columns: Optional[Dict[str, Union[List[str], Dict[str, Any]]]] = Field(default=None)
+
+    # Derived columns: alias → SQL expression string
+    derived_columns: Optional[Dict[str, str]] = Field(default=None)
+
+    # Whether to SELECT * from source (True = include all source columns)
+    include_source_columns: bool = Field(default=True)
+
+    # Full output schema — required when enable_ghost_records=True.
+    # List source columns in the same order as the DB table.
+    # Derived, hash, and missing columns are handled separately and
+    # do not need to appear here.
+    columns: Optional[List[ColumnDefinition]] = Field(default=None)
+
+    # Hashing behaviour overrides
+    case_sensitivity: Optional[bool] = Field(default=None)
+    use_rtrim: Optional[bool] = Field(default=None)
+
+    # NULL placeholder columns for schema evolution: col_name → SQL datatype
+    missing_columns: Optional[Dict[str, str]] = Field(default=None)
+
+    # Column name for a ROW_NUMBER() OVER () sequence expression
+    sequence: Optional[str] = Field(default=None)
+
+
+@dataclass
+class SourceBinding:
+    """
+    Pairs a physical SourceModel with per-source DV loading metadata.
+
+    Used wherever a generator can accept multiple sources (Hub, Link,
+    NHLink, RecordTrackingSat).  Each binding describes what the generator
+    should extract from that particular staging table.
+
+    Attributes:
+        source:            Physical table reference.
+        business_keys:     Source columns that form the hub business key.
+        foreign_hash_keys: Source columns that are foreign hash keys (Links).
+        hash_key_col:      Source column carrying the entity's hash key.
+                           Defaults to the generator's own hash-key parameter.
+        payload:           Source columns to carry as satellite / NHLink payload.
+        rsrc_statics:      LIKE-pattern strings for HWM scoping per source system.
+        additional_columns: Extra columns to carry through all CTEs.
+    """
+
+    source: SourceModel
+    business_keys: list[str] = field(default_factory=list)
+    foreign_hash_keys: list[str] = field(default_factory=list)
+    hash_key_col: Optional[str] = None
+    payload: list[str] = field(default_factory=list)
+    rsrc_statics: Optional[list[str]] = None
+    additional_columns: Optional[list[str]] = None

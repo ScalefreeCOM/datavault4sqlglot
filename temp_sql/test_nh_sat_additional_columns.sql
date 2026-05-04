@@ -1,0 +1,19 @@
+-- NH -- NH-Sat Full Load — additional_columns=[BATCH_ID, FILE_DATE]
+
+WITH source_data AS (
+  SELECT
+    HK_PRODUCT_H AS HK_PRODUCT_H,
+    PRODUCT_NAME,
+    CATEGORY,
+    LIST_PRICE,
+    BATCH_ID,
+    FILE_DATE,
+    LOAD_DATE AS ldts,
+    RECORD_SOURCE AS rsrc
+  FROM "RAW_DB"."STAGE"."STG_PRODUCT_DETAILS"
+  QUALIFY
+    ROW_NUMBER() OVER (PARTITION BY HK_PRODUCT_H ORDER BY ldts DESC NULLS LAST) = 1
+)
+SELECT
+  *
+FROM source_data
