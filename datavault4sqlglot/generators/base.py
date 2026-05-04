@@ -68,10 +68,11 @@ class BaseGenerator(ABC):
         """
         Converts table, schema, and database strings into a sqlglot.exp.Table.
         """
+        quoted = config.quote_identifiers
         return exp.Table(
-            this=exp.Identifier(this=table, quoted=True),
-            db=exp.Identifier(this=schema, quoted=True) if schema else None,
-            catalog=exp.Identifier(this=database, quoted=True) if database else None
+            this=exp.Identifier(this=table, quoted=quoted),
+            db=exp.Identifier(this=schema, quoted=quoted) if schema else None,
+            catalog=exp.Identifier(this=database, quoted=quoted) if database else None
         )
 
     @abstractmethod
@@ -189,7 +190,7 @@ class BaseGenerator(ABC):
         
         # 1. Cast
         # Use explicit Column with Identifier to ensure quoting
-        col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=True))
+        col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=config.quote_identifiers))
         c = exp.Cast(this=col_expr, to=varchar_type)
         
         # 2. Trim (if enabled)
@@ -205,7 +206,7 @@ class BaseGenerator(ABC):
         quote = exp.Literal.string(r'\"')
         quoted_col = exp.Concat(expressions=[quote, c, quote])
         
-        # 5. Return '^^' null-string placeholder when column is NULL
+        # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
 
     def _build_hash_expression(
