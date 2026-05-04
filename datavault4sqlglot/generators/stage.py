@@ -4,9 +4,9 @@ from typing import Optional
 
 from sqlglot import exp, parse_one
 
+from datavault4sqlglot.config import config
 from datavault4sqlglot.generators.base import BaseGenerator
 from datavault4sqlglot.metadata import StageModel
-from datavault4sqlglot.config import config
 
 
 class StageGenerator(BaseGenerator):
@@ -76,7 +76,7 @@ class StageGenerator(BaseGenerator):
             # derived CTE wraps source_query (already filtered), main reads from the CTE
             derived_with = self._build_derived_cte(source_query)
             from_table: exp.Expression = exp.Table(
-                this=exp.Identifier(this=derived_cte_name, quoted=True)
+                this=exp.Identifier(this=derived_cte_name, quoted=False)
             )
         else:
             derived_with = None
@@ -108,7 +108,7 @@ class StageGenerator(BaseGenerator):
                         use_rtrim=hash_config.get("use_rtrim", src.use_rtrim),
                     )
                 projection.append(
-                    hash_expr.as_(exp.Identifier(this=alias, quoted=True))
+                    hash_expr.as_(exp.Identifier(this=alias, quoted=config.quote_identifiers))
                 )
 
         # NULL placeholder columns for schema evolution (mirrors datavault4dbt missing_columns)
@@ -154,10 +154,9 @@ class StageGenerator(BaseGenerator):
             for alias, expr_str in self.source_model.derived_columns.items():
                 selection.append(
                     parse_one(expr_str).as_(
-                        exp.Identifier(this=alias, quoted=True)
+                        exp.Identifier(this=alias, quoted=config.quote_identifiers)
                     )
                 )
         return exp.select(*selection).from_(
             exp.Subquery(this=source_query, alias=exp.TableAlias(this=exp.Identifier(this="_src")))
         )
-
