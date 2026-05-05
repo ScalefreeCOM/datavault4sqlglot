@@ -193,7 +193,7 @@ class BaseGenerator(ABC):
         """Returns the appropriate VARCHAR type for hashing for the given dialect."""
         if dialect == "oracle":
             return exp.DataType.build("VARCHAR2(2000)")
-        elif dialect in ("tsql", "synapse"):
+        elif dialect in ("tsql", "fabric"):
             return exp.DataType.build("VARCHAR(4000)")
         elif dialect == "exasol":
             return exp.DataType.build("VARCHAR(20000)")
@@ -227,7 +227,7 @@ class BaseGenerator(ABC):
         quoted_col = exp.Concat(expressions=[dq, c, exp.Literal.string('"')])
 
         # Some dialects collapse empty strings to NULL; NULLIF distinguishes "" from ^^
-        if dialect in ("tsql", "synapse", "oracle", "exasol"):
+        if dialect in ("tsql", "fabric", "oracle", "exasol"):
             quoted_col = exp.Nullif(this=quoted_col, expression=exp.Literal.string('""'))
 
         # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
@@ -244,8 +244,8 @@ class BaseGenerator(ABC):
         alg = algorithm.upper()
         hex_len = 64 if alg in ("SHA256", "SHA2") else 32
 
-        if dialect in ("tsql", "synapse"):
-            # T-SQL: LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', inner), 2))
+        if dialect in ("tsql", "fabric"):
+            # T-SQL / Fabric: LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', inner), 2))
             tsql_alg = "SHA2_256" if alg == "SHA256" else "MD5"
             hb = exp.Anonymous(this="HASHBYTES", expressions=[
                 exp.Literal.string(tsql_alg), inner
@@ -263,8 +263,30 @@ class BaseGenerator(ABC):
             ])
             return exp.Lower(this=exp.Cast(this=sh, to=exp.DataType.build(f"VARCHAR2({hex_len})")))
 
+        elif dialect in ("presto", "trino", "athena"):
+            # These hash functions take VARBINARY — convert string to bytes first, then hex-encode result.
+            # Using exp.Anonymous bypasses sqlglot's auto-transpilation which would add a redundant LOWER.
+            if alg == "SHA256":
+                hash_fn = exp.Anonymous(this="SHA256", expressions=[
+                    exp.Anonymous(this="TO_UTF8", expressions=[inner])
+                ])
+            else:
+                hash_fn = exp.Anonymous(this="MD5", expressions=[
+                    exp.Anonymous(this="TO_UTF8", expressions=[inner])
+                ])
+            return exp.Lower(this=exp.Anonymous(this="TO_HEX", expressions=[hash_fn]))
+
+        elif dialect == "clickhouse":
+            # ClickHouse HEX() returns uppercase hex — wrap with LOWER.
+            # Using exp.Anonymous to avoid sqlglot's auto-transpilation which adds a redundant LOWER.
+            if alg == "SHA256":
+                hash_fn = exp.Anonymous(this="SHA256", expressions=[inner])
+            else:
+                hash_fn = exp.Anonymous(this="MD5", expressions=[inner])
+            return exp.Lower(this=exp.Anonymous(this="HEX", expressions=[hash_fn]))
+
         else:
-            # Snowflake, Postgres, Redshift, Databricks, Exasol — standard functions
+            # Snowflake, Postgres, Redshift, Databricks, DuckDB, Hive, Teradata, Exasol, etc.
             if alg == "SHA256":
                 h: exp.Expression = exp.SHA2(this=inner, length=exp.Literal.number(256))
             elif hasattr(exp, alg):
@@ -319,7 +341,7 @@ class BaseGenerator(ABC):
         # T-SQL and Redshift lack REGEXP_REPLACE — use plain REPLACE for those dialects
         for char_code in [9, 10, 11, 13]:
             char = exp.Chr(expressions=[exp.Literal.number(char_code)])
-            if dialect in ("tsql", "synapse", "redshift"):
+            if dialect in ("tsql", "fabric", "redshift"):
                 concat_block = exp.Replace(
                     this=concat_block, expression=char, replacement=exp.Literal.string("")
                 )
