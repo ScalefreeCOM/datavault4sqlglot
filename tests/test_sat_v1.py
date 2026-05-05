@@ -10,7 +10,7 @@ Run with:  pytest tests/test_sat_v1.py -v -s
 from __future__ import annotations
 
 from datavault4sqlglot.config import config
-from datavault4sqlglot.generators.sat_v1 import SatelliteV1Generator
+from datavault4sqlglot.generators.satellite_v1 import SatelliteV1Generator
 
 
 def _gen(**kwargs: object) -> SatelliteV1Generator:
