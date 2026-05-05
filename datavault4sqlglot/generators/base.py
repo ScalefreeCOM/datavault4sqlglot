@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
 import logging
-from typing import List, Union, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
+import sqlglot
 from sqlglot import exp
 from sqlglot.expressions import DataType
+
 from datavault4sqlglot.config import config
+from datavault4sqlglot.metadata import SourceBinding, SourceModel
 
 
 class BaseGenerator(ABC):
@@ -13,9 +16,9 @@ class BaseGenerator(ABC):
     """
 
     def __init__(
-        self,
-        target_table: Optional[str] = None,
-        target_schema: Optional[str] = None,
+        self, 
+        target_table: str, 
+        target_schema: Optional[str] = None, 
         target_database: Optional[str] = None,
         dialect: Optional[str] = None
     ):
@@ -31,6 +34,30 @@ class BaseGenerator(ABC):
         Prioritizes instance-level override, then falls back to global configuration.
         """
         return self._dialect or config.dialect
+
+    def _resolve_column_config(
+        self, col_config: Union[str, Dict[str, str]]
+    ) -> Tuple[str, str]:
+        """
+        Returns (source_column_name, target_alias) for a column that may be supplied
+        as a plain string or as ``{"source_column": "x", "alias": "y"}``.
+        """
+        if isinstance(col_config, dict):
+            src = col_config["source_column"]
+            return src, col_config.get("alias", src)
+        return col_config, col_config
+
+    def _get_table_with_alias(
+        self,
+        table: str,
+        alias: str,
+        schema: Optional[str] = None,
+        database: Optional[str] = None,
+    ) -> exp.Table:
+        """Like _get_table_expression but adds a table alias."""
+        tbl = self._get_table_expression(table, schema, database)
+        tbl.set("alias", exp.TableAlias(this=exp.Identifier(this=alias)))
+        return tbl
 
     def _get_table_expression(
         self, 
@@ -59,6 +86,77 @@ class BaseGenerator(ABC):
         Renders the generated expression into a SQL string based on the configuration or instance dialect.
         """
         return self.generate_sql().sql(dialect=self.dialect, pretty=pretty)
+
+    def _build_rsrc_static_hwm_query(
+        self,
+        bindings: List[SourceBinding],
+        target_exp: exp.Table,
+        ldts_col: str,
+        rsrc_col: str,
+        end_of_all_times: str,
+    ) -> Optional[exp.Expression]:
+        """
+        Builds a UNION ALL of ``SELECT MAX(ldts) AS max_ldts, '<val>' AS rsrc_static``
+        per rsrc_static value across all bindings.
+
+        Returns None when no binding has rsrc_statics defined.  The result is
+        intended as the body of the ``max_ldts_per_rsrc_static_in_target`` CTE.
+        """
+        union_selects = []
+        for src in bindings:
+            for sv in (src.rsrc_statics or []):
+                union_selects.append(
+                    exp.select(
+                        exp.Max(this=exp.column(ldts_col)).as_("max_ldts"),
+                        exp.Literal.string(sv).as_("rsrc_static"),
+                    )
+                    .from_(target_exp)
+                    .where(exp.column(rsrc_col).like(exp.Literal.string(sv)))
+                    .where(exp.column(ldts_col).neq(exp.Literal.string(end_of_all_times)))
+                )
+        if not union_selects:
+            return None
+        return (
+            sqlglot.union(*union_selects, distinct=False)
+            if len(union_selects) > 1
+            else union_selects[0]
+        )
+
+    def _build_rsrc_static_or_filter(
+        self,
+        statics: List[str],
+        src_ldts: str,
+        src_rsrc: str,
+        hwm_cte_name: str,
+        beginning_of_all_times: str,
+    ) -> exp.Expression:
+        """
+        Builds the OR expression used to filter a source CTE against the HWM CTE:
+
+            (rsrc = 'val' AND src_ldts > (SELECT COALESCE(MAX(max_ldts), boa)
+                                           FROM hwm_cte WHERE rsrc_static = 'val'))
+            OR ...
+
+        One branch per entry in ``statics``.
+        """
+        conditions = [
+            exp.and_(
+                exp.column(src_rsrc).like(exp.Literal.string(sv)),
+                exp.column(src_ldts)
+                > exp.Paren(
+                    this=exp.select(
+                        exp.Coalesce(
+                            this=exp.Max(this=exp.column("max_ldts")),
+                            expressions=[exp.Literal.string(beginning_of_all_times)],
+                        )
+                    )
+                    .from_(hwm_cte_name)
+                    .where(exp.column("rsrc_static").like(exp.Literal.string(sv)))
+                ),
+            )
+            for sv in statics
+        ]
+        return exp.or_(*conditions)
 
     def _hash_column(
         self, 
@@ -107,8 +205,8 @@ class BaseGenerator(ABC):
         quote = exp.Literal.string(r'\"')
         quoted_col = exp.Concat(expressions=[quote, c, quote])
         
-        # 5. Handle Nulls with Ghost Record '^^'
-        return exp.Nullif(this=quoted_col, expression=exp.Literal.string("^^"))
+        # 5. Return '^^' null-string placeholder when column is NULL
+        return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
 
     def _build_hash_expression(
         self, 

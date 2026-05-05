@@ -14,8 +14,6 @@ class DataVaultConfig(BaseModel):
     rsrc_alias: str = Field(default="rsrc", description="Alias for the record source column.")
     ledts_alias: str = Field(default="ledts", description="Alias for the load end date column.")
     hash: str = Field(default="MD5", description="Default hash algorithm.")
-    default_unknown_rsrc: str = Field(default="SYSTEM", description="Default record source for unknown records.")
-    default_error_rsrc: str = Field(default="ERROR", description="Default record source for error records.")
     hashkey_input_case_sensitive: bool = Field(default=False, description="Default case sensitivity for hash keys.")
     hashdiff_input_case_sensitive: bool = Field(default=True, description="Default case sensitivity for hash diffs.")
     use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")

@@ -1,149 +1,128 @@
-from typing import List, Dict, Optional
+from __future__ import annotations
 
-import sqlglot
+from typing import List, Optional
+
 from sqlglot import exp
 
-from datavault4sqlglot.generators.base import BaseGenerator
-from datavault4sqlglot.metadata import SourceModel
 from datavault4sqlglot.config import config
+from datavault4sqlglot.generators.base import BaseGenerator
+from datavault4sqlglot.metadata import SourceBinding
 
 
 class HubGenerator(BaseGenerator):
-    """
-    Generates SQL for a Data Vault Hub entity.
-    """
+    """Generates SQL for a Data Vault Hub entity."""
 
     def __init__(
-        self, 
-        target_table: str, 
-        source_models: List[SourceModel], 
+        self,
+        target_table: str,
+        sources: List[SourceBinding],
         hashkey: str,
-        target_schema: Optional[str] = None, 
+        target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
+        additional_columns: Optional[List[str]] = None,
         end_of_all_times: Optional[str] = None,
-        dialect: Optional[str] = None
+        beginning_of_all_times: Optional[str] = None,
+        dialect: Optional[str] = None,
     ):
-
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
-        self.source_models = source_models
+        self.sources = sources
         self.hashkey = hashkey
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
+        self.additional_columns = additional_columns or []
         self.end_of_all_times = end_of_all_times or config.end_of_all_times
-
+        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
     def generate_sql(self) -> exp.Expression:
-        # Configuration
-        # These are target names, but could be configurable via init if needed
         hashkey_col = self.hashkey
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
+        boa = self.beginning_of_all_times
 
-        # Helper for target table
-        target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
+        target_exp = self._get_table_expression(
+            self.target_table, self.target_schema, self.target_database
+        )
+
+        ctes: dict = {}
 
         # ---------------------------------------------------------
-        # 1. HWM Logic
+        # 1. HWM CTE (per-source rsrc_static)
         # ---------------------------------------------------------
         hwm_cte_name = "max_ldts_per_rsrc_static_in_target"
-        ctes = {}
-        union_selects = []
-        has_rsrc_static_logic = False
 
         if self.is_incremental and not self.disable_hwm:
-            for src in self.source_models:
-                statics = src.rsrc_statics or []
-                if statics:
-                    has_rsrc_static_logic = True
-                    for static_val in statics:
-                        q = (
-                            exp.select(
-                                exp.Max(this=exp.column(ldts_col)).as_("max_ldts"),
-                                exp.Literal.string(static_val).as_("rsrc_static")
-                            )
-                            .from_(target_exp)
-                            .where(exp.column(rsrc_col).like(exp.Literal.string(static_val)))
-                            .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
-                        )
-                        union_selects.append(q)
-
-            if has_rsrc_static_logic and union_selects:
-                if len(union_selects) > 1:
-                    final_hwm_query = sqlglot.union(*union_selects, distinct=False)
-                else:
-                    final_hwm_query = union_selects[0]
-                ctes[hwm_cte_name] = final_hwm_query
+            hwm_query = self._build_rsrc_static_hwm_query(
+                self.sources, target_exp, ldts_col, rsrc_col, self.end_of_all_times
+            )
+            if hwm_query is not None:
+                ctes[hwm_cte_name] = hwm_query
 
         # ---------------------------------------------------------
-        # 2. Process Sources
+        # 2. Per-source CTEs
         # ---------------------------------------------------------
         source_cte_names = []
-        
-        for idx, src in enumerate(self.source_models):
-            src_id = str(idx) # Use index for unique source naming
-            src_table_exp = self._get_table_expression(src.table_name, src.schema_name, src.database)
-            bk_columns = src.business_keys
-            statics = src.rsrc_statics or []
-            
-            # Determine source HK column name (default to 'hash_key' if not set)
-            src_hk = src.hash_key_col if src.hash_key_col else hashkey_col
+
+        for idx, binding in enumerate(self.sources):
+            src = binding.source
+            src_table_exp = self._get_table_expression(
+                src.table_name, src.schema_name, src.database
+            )
+            src_hk = binding.hash_key_col or hashkey_col
             src_ldts = src.load_date_col or ldts_col
             src_rsrc = src.record_source_col or rsrc_col
+            statics = binding.rsrc_statics or []
+            extra_cols = binding.additional_columns or self.additional_columns
 
-            # 2.1 Build Source Selection
-            select_expressions = [
-                exp.column(src_hk).as_(hashkey_col)
-            ]
+            select_exprs = [exp.column(src_hk).as_(hashkey_col)]
+            for bk in binding.business_keys:
+                select_exprs.append(exp.column(bk))
+            for col in extra_cols:
+                select_exprs.append(exp.column(col))
+            select_exprs.append(exp.column(src_ldts).as_(ldts_col))
+            select_exprs.append(exp.column(src_rsrc).as_(rsrc_col))
 
-            # Business Keys
-            for bk in bk_columns:
-                select_expressions.append(exp.column(bk))
+            src_query = exp.select(*select_exprs).from_(src_table_exp)
 
-            select_expressions.append(exp.column(src_ldts).as_(ldts_col))
-            select_expressions.append(exp.column(src_rsrc).as_(rsrc_col))
-
-            src_query = exp.select(*select_expressions).from_(src_table_exp)
-
-            # 2.2 Incremental Logic (Source Filter)
             if self.is_incremental and not self.disable_hwm:
-                 if statics and hwm_cte_name in ctes:
-                    or_conditions = []
-                    for static_val in statics:
-                         subquery = (
-                             exp.select(exp.Max(this=exp.column("max_ldts")))
-                             .from_(hwm_cte_name) # Use string for CTE ref
-                             .where(exp.column("rsrc_static").eq(exp.Literal.string(static_val)))
-                         )
-                         # IMPORTANT: Use source column names in filter, not target aliases
-                         cond = exp.and_(
-                             exp.column(src_rsrc).eq(exp.Literal.string(static_val)),
-                             exp.column(src_ldts) > exp.Paren(this=subquery)
-                         )
-                         or_conditions.append(cond)
-                    
-                    if or_conditions:
-                        src_query = src_query.where(exp.or_(*or_conditions))
-                 
-                 elif not statics:
-                     # Generic HWM
-                     subquery = exp.select(exp.Max(this=exp.column(ldts_col))).from_(target_exp)
-                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
+                if statics and hwm_cte_name in ctes:
+                    src_query = src_query.where(
+                        self._build_rsrc_static_or_filter(
+                            statics, src_ldts, src_rsrc, hwm_cte_name, boa
+                        )
+                    )
+                elif not statics and len(self.sources) == 1:
+                    subquery = (
+                        exp.select(
+                            exp.Coalesce(
+                                this=exp.Max(this=exp.column(ldts_col)),
+                                expressions=[exp.Literal.string(boa)],
+                            )
+                        )
+                        .from_(target_exp)
+                        .where(
+                            exp.column(ldts_col).neq(
+                                exp.Literal.string(self.end_of_all_times)
+                            )
+                        )
+                    )
+                    src_query = src_query.where(
+                        exp.column(src_ldts) > exp.Paren(this=subquery)
+                    )
 
-            cte_name = f"src_new_{src_id}"
+            cte_name = f"src_new_{idx}"
             ctes[cte_name] = src_query
             source_cte_names.append(cte_name)
 
         # ---------------------------------------------------------
-        # 3. Union All Sources
+        # 3. Union all sources
         # ---------------------------------------------------------
         if len(source_cte_names) > 1:
             union_query = exp.select("*").from_(source_cte_names[0])
             for name in source_cte_names[1:]:
                 union_query = union_query.union(
-                     exp.select("*").from_(name),
-                     distinct=False
+                    exp.select("*").from_(name), distinct=False
                 )
             ctes["source_new_union"] = union_query
             last_cte = "source_new_union"
@@ -151,49 +130,41 @@ class HubGenerator(BaseGenerator):
             last_cte = source_cte_names[0]
 
         # ---------------------------------------------------------
-        # 4. Deduplication
+        # 4. Deduplication — earliest occurrence per hash key
         # ---------------------------------------------------------
-        dedup_query = exp.select("*").from_(last_cte)
-        
-        # ROW_NUMBER() OVER (PARTITION BY hk ORDER BY ldts)
-        # Using native expressions instead of parse_one/string
         window_expression = exp.Window(
             this=exp.RowNumber(),
             partition_by=[exp.column(hashkey_col)],
-            order=exp.Order(expressions=[exp.Ordered(this=exp.column(ldts_col))])
+            order=exp.Order(expressions=[exp.Ordered(this=exp.column(ldts_col))]),
         )
-        
-        dedup_query = dedup_query.qualify(window_expression.eq(1))
-        
-        ctes["earliest_hk_over_all_sources"] = dedup_query
+        ctes["earliest_hk_over_all_sources"] = (
+            exp.select("*").from_(last_cte).qualify(window_expression.eq(1))
+        )
         last_cte = "earliest_hk_over_all_sources"
 
         # ---------------------------------------------------------
-        # 5. Incremental Logic: Target Check
+        # 5. Incremental — exclude existing hash keys
         # ---------------------------------------------------------
         if self.is_incremental:
-            # 5.1 CTE: distinct_target_hashkeys
-            target_cte_name = "distinct_target_hashkeys"
-            target_select = exp.select(hashkey_col).from_(target_exp)
-            ctes[target_cte_name] = target_select
-            
-            # 5.2 CTE: records_to_insert
-            insert_cte_name = "records_to_insert"
-            insert_query = exp.select("*").from_(last_cte).where(
-                exp.column(hashkey_col).isin(exp.select(hashkey_col).from_(target_cte_name)).not_()
+            target_cte = "distinct_target_hashkeys"
+            ctes[target_cte] = exp.select(hashkey_col).from_(target_exp)
+
+            ctes["records_to_insert"] = (
+                exp.select("*")
+                .from_(last_cte)
+                .where(
+                    exp.column(hashkey_col)
+                    .isin(exp.select(hashkey_col).from_(target_cte))
+                    .not_()
+                )
             )
-            ctes[insert_cte_name] = insert_query
-            last_cte = insert_cte_name
+            last_cte = "records_to_insert"
 
         # ---------------------------------------------------------
-        # 6. Final Select
+        # 6. Final SELECT + assemble CTEs
         # ---------------------------------------------------------
         final_query = exp.select("*").from_(last_cte)
-
-        # ---------------------------------------------------------
-        # 7. Assemble CTEs
-        # ---------------------------------------------------------
         for name, expression in ctes.items():
             final_query = final_query.with_(name, as_=expression)
-            
+
         return final_query
