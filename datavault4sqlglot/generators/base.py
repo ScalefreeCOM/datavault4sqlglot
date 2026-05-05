@@ -188,13 +188,24 @@ class BaseGenerator(ABC):
     def _chr(code: int) -> exp.Expression:
         return exp.Chr(expressions=[exp.Literal.number(code)])
 
+    @staticmethod
+    def _dialect_varchar(dialect: str) -> exp.DataType:
+        """Returns the appropriate VARCHAR type for hashing for the given dialect."""
+        if dialect == "oracle":
+            return exp.DataType.build("VARCHAR2(2000)")
+        elif dialect in ("tsql", "synapse"):
+            return exp.DataType.build("VARCHAR(4000)")
+        elif dialect == "exasol":
+            return exp.DataType.build("VARCHAR(20000)")
+        return exp.DataType(this=exp.DataType.Type.VARCHAR)
+
     def _clean_column(self, col_name: str, use_rtrim: bool = True):
         """Standard Data Vault column cleaning for hashing."""
-        varchar_type = self._get_type(DataType.Type.VARCHAR)
+        dialect = (self.dialect or "").lower()
 
         # 1. Cast
         col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=config.quote_identifiers))
-        c = exp.Cast(this=col_expr, to=varchar_type)
+        c = exp.Cast(this=col_expr, to=self._dialect_varchar(dialect))
 
         # 2. Trim (if enabled)
         if use_rtrim:
@@ -214,6 +225,10 @@ class BaseGenerator(ABC):
         # 4. Wrap: CONCAT('"', c, '"')  =  "value"
         dq = exp.Literal.string('"')
         quoted_col = exp.Concat(expressions=[dq, c, exp.Literal.string('"')])
+
+        # Some dialects collapse empty strings to NULL; NULLIF distinguishes "" from ^^
+        if dialect in ("tsql", "synapse", "oracle", "exasol"):
+            quoted_col = exp.Nullif(this=quoted_col, expression=exp.Literal.string('""'))
 
         # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
@@ -247,14 +262,6 @@ class BaseGenerator(ABC):
                 inner, exp.Literal.string(oracle_alg)
             ])
             return exp.Lower(this=exp.Cast(this=sh, to=exp.DataType.build(f"VARCHAR2({hex_len})")))
-
-        elif dialect == "bigquery":
-            # BigQuery: MD5/SHA256 return BYTES — must wrap in TO_HEX
-            if alg == "SHA256":
-                hash_inner = exp.SHA2(this=inner, length=exp.Literal.number(256))
-            else:
-                hash_inner = exp.MD5(this=inner)
-            return exp.Lower(this=exp.Anonymous(this="TO_HEX", expressions=[hash_inner]))
 
         else:
             # Snowflake, Postgres, Redshift, Databricks, Exasol — standard functions
@@ -290,8 +297,7 @@ class BaseGenerator(ABC):
         if use_rtrim is None:
             use_rtrim = config.use_trim
 
-        varchar_type = self._get_type(DataType.Type.VARCHAR)
-
+        dialect = (self.dialect or "").lower()
         processed_cols = [self._clean_column(c, use_rtrim=use_rtrim) for c in columns]
         num_cols = len(columns)
 
@@ -305,22 +311,26 @@ class BaseGenerator(ABC):
                 expressions=[exp.Literal.string("||"), *processed_cols]
             )
             null_check_string = "||".join(["^^"] * num_cols)
-        
+
         # case_sensitivity=False → apply UPPER (standard DV behavior); True → preserve case
         if not case_sensitivity:
             concat_block = exp.Upper(this=concat_block)
-            
-        # Remove newlines, tabs, vertical tabs, carriage returns (loop with REGEXP_REPLACE and CHR(i))
+
+        # T-SQL and Redshift lack REGEXP_REPLACE — use plain REPLACE for those dialects
         for char_code in [9, 10, 11, 13]:
-            concat_block = exp.RegexpReplace(
-                this=concat_block,
-                expression=exp.Chr(expressions=[exp.Literal.number(char_code)]),
-                replacement=exp.Literal.string("")
-            )
-        
+            char = exp.Chr(expressions=[exp.Literal.number(char_code)])
+            if dialect in ("tsql", "synapse", "redshift"):
+                concat_block = exp.Replace(
+                    this=concat_block, expression=char, replacement=exp.Literal.string("")
+                )
+            else:
+                concat_block = exp.RegexpReplace(
+                    this=concat_block, expression=char, replacement=exp.Literal.string("")
+                )
+
         # NULLIF(CAST(stripped AS VARCHAR), '^^||^^')
         nullif_block = exp.Nullif(
-             this=exp.Cast(this=concat_block, to=varchar_type),
+             this=exp.Cast(this=concat_block, to=self._dialect_varchar(dialect)),
              expression=exp.Literal.string(null_check_string)
         )
         
