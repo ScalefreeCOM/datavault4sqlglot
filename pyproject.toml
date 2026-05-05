@@ -21,6 +21,9 @@ dependencies = [
 ]
 requires-python = ">=3.7"
 
+[project.optional-dependencies]
+test = ["duckdb"]
+
 [project.urls]
 Homepage = "https://github.com/yourusername/datavault4sqlglot"
 Repository = "https://github.com/yourusername/datavault4sqlglot"

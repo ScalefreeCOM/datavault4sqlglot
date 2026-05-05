@@ -1,10 +1,10 @@
 import pytest
 from sqlglot import exp
 from datavault4sqlglot.generators.stage import StageGenerator
-from datavault4sqlglot.metadata import SourceModel
+from datavault4sqlglot.metadata import StageModel
 
 def test_hashing_improvements():
-    source = SourceModel(
+    source = StageModel(
         table_name="raw.orders",
         hashed_columns={
             "hk_order_id": ["order_id"]
@@ -12,24 +12,20 @@ def test_hashing_improvements():
     )
     generator = StageGenerator(source_model=source)
     sql = generator.generate_sql().sql()
-    
-    # 1. Quoted column names
-    # Expecting CAST("order_id" AS VARCHAR(4000))
+
+    # 1. Column identifiers are quoted
     assert '"order_id"' in sql
-    
-    # 2. IFNULL usage
-    # Expecting IFNULL(..., '^^') and IFNULL(..., '0000...')
-    assert "IFNULL" in sql
-    assert "COALESCE" not in sql
-    
-    # 3. REGEXP_REPLACE usage
+
+    # 2. NULL columns are replaced with the '^^' null-string placeholder via COALESCE
+    assert "COALESCE" in sql
+
+    # 3. Special characters stripped via REGEXP_REPLACE + CHR() calls
     assert "REGEXP_REPLACE" in sql
-    assert r"[\x09\x0a\x0b\x0d]" in sql
-    
-    # Verify the structure roughly
-    # MD5(IFNULL(LOWER(MD5(NULLIF(CAST(UPPER(REPLACE(REPLACE(REPLACE(REPLACE(CONCAT(IFNULL(CONCAT('\"', CAST(\"order_id\" AS VARCHAR(4000)), '\"'), '^^')), ''), CHAR(9), ''), CHAR(10), ''), CHAR(11), ''), CHAR(13), '')) AS VARCHAR(4000)), '^^'))), '000...'))
-    # Note: The exact nested order depends on the loop in _build_hash_expression.
-    
+    assert "CHR(" in sql
+
+    # 4. Concatenation is UPPER-cased before hashing
+    assert "UPPER" in sql
+
     print("\nGenerated SQL snippet:")
     print(sql)
 

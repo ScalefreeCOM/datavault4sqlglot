@@ -1,3 +1,3 @@
-from .source import SourceModel
+from .source import SourceBinding, SourceModel, StageModel
 
-__all__ = ["SourceModel"]
+__all__ = ["SourceBinding", "SourceModel", "StageModel"]
