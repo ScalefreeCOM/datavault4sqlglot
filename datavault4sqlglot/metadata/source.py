@@ -6,18 +6,6 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ColumnDefinition(BaseModel):
-    """
-    Schema definition for a single source column.
-
-    Used by StageGenerator for explicit ghost record generation.
-    The API caller provides this from their catalog / introspection result.
-    """
-
-    name: str
-    data_type: str  # e.g. "VARCHAR", "TIMESTAMP", "NUMBER(10,2)", "BOOLEAN"
-
-
 class SourceModel(BaseModel):
     """
     Physical table reference used as input to DV entity generators (Hub, Link, Sat, …).
@@ -43,7 +31,7 @@ class StageModel(BaseModel):
     Metadata for a raw source table fed into StageGenerator.
 
     Extends the physical table reference with all stage-layer concerns:
-    hashing, derived columns, schema evolution, and ghost-record support.
+    hashing, derived columns, and schema evolution.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -65,12 +53,6 @@ class StageModel(BaseModel):
     # Whether to SELECT * from source (True = include all source columns)
     include_source_columns: bool = Field(default=True)
 
-    # Full output schema — required when enable_ghost_records=True.
-    # List source columns in the same order as the DB table.
-    # Derived, hash, and missing columns are handled separately and
-    # do not need to appear here.
-    columns: Optional[List[ColumnDefinition]] = Field(default=None)
-
     # Hashing behaviour overrides
     case_sensitivity: Optional[bool] = Field(default=None)
     use_rtrim: Optional[bool] = Field(default=None)
@@ -87,9 +69,9 @@ class SourceBinding:
     """
     Pairs a physical SourceModel with per-source DV loading metadata.
 
-    Used wherever a generator can accept multiple sources (Hub, Link,
-    NHLink, RecordTrackingSat).  Each binding describes what the generator
-    should extract from that particular staging table.
+    Used wherever a generator can accept multiple sources (Hub, Link).
+    Each binding describes what the generator should extract from that
+    particular staging table.
 
     Attributes:
         source:            Physical table reference.

@@ -1,10 +1,3 @@
-import sys
-import os
-from sqlglot import exp
-
-# Add the package to path
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), ".")))
-
 from datavault4sqlglot import HubGenerator, config
 from datavault4sqlglot.metadata import SourceBinding, SourceModel
 

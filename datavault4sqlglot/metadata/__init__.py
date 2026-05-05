@@ -1,3 +1,3 @@
-from .source import ColumnDefinition, SourceBinding, SourceModel, StageModel
+from .source import SourceBinding, SourceModel, StageModel
 
-__all__ = ["ColumnDefinition", "SourceBinding", "SourceModel", "StageModel"]
+__all__ = ["SourceBinding", "SourceModel", "StageModel"]

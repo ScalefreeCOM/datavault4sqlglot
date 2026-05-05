@@ -4,25 +4,11 @@ Run with:  pytest tests/test_hub.py -v -s
 """
 from __future__ import annotations
 
-import inspect
-from pathlib import Path
-
 import pytest
 
 from datavault4sqlglot.config import config
 from datavault4sqlglot.generators.hub import HubGenerator
 from datavault4sqlglot.metadata import SourceBinding, SourceModel
-
-_OUT_DIR = Path(__file__).parent.parent / "temp_sql"
-
-
-def _print(label: str, sql: str) -> None:
-    _OUT_DIR.mkdir(parents=True, exist_ok=True)
-    caller = inspect.currentframe().f_back.f_code.co_name
-    (_OUT_DIR / f"{caller}.sql").write_text(
-        f"-- HUB -- {label}\n\n{sql}\n", encoding="utf-8"
-    )
-    print(f"\n{'='*70}\nHUB -- {label}\n{'='*70}\n{sql}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +69,10 @@ TARGET = dict(
 # ---------------------------------------------------------------------------
 # 1. Full load — single source
 # ---------------------------------------------------------------------------
-def test_hub_full_load_single_source():
+def test_hub_full_load_single_source(write_sql):
     gen = HubGenerator(**TARGET, sources=[SRC_ORDERS], is_incremental=False)
     sql = gen.to_sql()
-    _print("Full Load — Single Source", sql)
+    write_sql("Full Load — Single Source", sql)
     assert "STG_ORDERS" in sql
     assert "ORDER_ID" in sql
     assert "earliest_hk_over_all_sources" in sql
@@ -98,10 +84,10 @@ def test_hub_full_load_single_source():
 # ---------------------------------------------------------------------------
 # 2. Full load — multi source (UNION ALL)
 # ---------------------------------------------------------------------------
-def test_hub_full_load_multi_source():
+def test_hub_full_load_multi_source(write_sql):
     gen = HubGenerator(**TARGET, sources=[SRC_ORDERS, SRC_WEB], is_incremental=False)
     sql = gen.to_sql()
-    _print("Full Load — Multi Source (UNION ALL)", sql)
+    write_sql("Full Load — Multi Source (UNION ALL)", sql)
     assert "source_new_union" in sql
     assert "STG_ORDERS" in sql
     assert "STG_WEB_ORDERS" in sql
@@ -110,10 +96,10 @@ def test_hub_full_load_multi_source():
 # ---------------------------------------------------------------------------
 # 3. Incremental — single source, no rsrc_static → global HWM (COALESCE MAX)
 # ---------------------------------------------------------------------------
-def test_hub_incremental_single_source_no_rsrc_static():
+def test_hub_incremental_single_source_no_rsrc_static(write_sql):
     gen = HubGenerator(**TARGET, sources=[SRC_ORDERS], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Single Source, no rsrc_static (global HWM)", sql)
+    write_sql("Incremental — Single Source, no rsrc_static (global HWM)", sql)
     assert "MAX" in sql
     assert "COALESCE" in sql
     assert "distinct_target_hashkeys" in sql
@@ -123,10 +109,10 @@ def test_hub_incremental_single_source_no_rsrc_static():
 # ---------------------------------------------------------------------------
 # 4. Incremental — single source, rsrc_static → per-source HWM
 # ---------------------------------------------------------------------------
-def test_hub_incremental_single_source_rsrc_static():
+def test_hub_incremental_single_source_rsrc_static(write_sql):
     gen = HubGenerator(**TARGET, sources=[SRC_ORDERS_WITH_STATIC], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Single Source, rsrc_static=ERP/ORDERS (per-source HWM)", sql)
+    write_sql("Incremental — Single Source, rsrc_static=ERP/ORDERS (per-source HWM)", sql)
     assert "max_ldts_per_rsrc_static_in_target" in sql
     assert "ERP/ORDERS" in sql
     assert "COALESCE" in sql
@@ -135,10 +121,10 @@ def test_hub_incremental_single_source_rsrc_static():
 # ---------------------------------------------------------------------------
 # 5. Incremental — multi source, all rsrc_static → per-source HWM per source
 # ---------------------------------------------------------------------------
-def test_hub_incremental_multi_source_all_rsrc_static():
+def test_hub_incremental_multi_source_all_rsrc_static(write_sql):
     gen = HubGenerator(**TARGET, sources=[SRC_SAP, SRC_WEB], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Multi Source, all rsrc_static (per-source HWM)", sql)
+    write_sql("Incremental — Multi Source, all rsrc_static (per-source HWM)", sql)
     assert "max_ldts_per_rsrc_static_in_target" in sql
     assert "SAP/ORDERS" in sql
     assert "WEB/%" in sql
@@ -147,12 +133,12 @@ def test_hub_incremental_multi_source_all_rsrc_static():
 # ---------------------------------------------------------------------------
 # 6. Incremental — multi source, no rsrc_static → no time filter (safe)
 # ---------------------------------------------------------------------------
-def test_hub_incremental_multi_source_no_rsrc_static():
+def test_hub_incremental_multi_source_no_rsrc_static(write_sql):
     src_a = SourceBinding(source=SourceModel(table_name="STG_A"), business_keys=["ORDER_ID"])
     src_b = SourceBinding(source=SourceModel(table_name="STG_B"), business_keys=["ORDER_ID"])
     gen = HubGenerator(**TARGET, sources=[src_a, src_b], is_incremental=True)
     sql = gen.to_sql()
-    _print(
+    write_sql(
         "Incremental — Multi Source, no rsrc_static (no HWM, only NOT IN dedup)",
         sql,
     )
@@ -164,12 +150,12 @@ def test_hub_incremental_multi_source_no_rsrc_static():
 # ---------------------------------------------------------------------------
 # 7. Incremental — disable_hwm → skip HWM, keep NOT IN dedup
 # ---------------------------------------------------------------------------
-def test_hub_incremental_disable_hwm():
+def test_hub_incremental_disable_hwm(write_sql):
     gen = HubGenerator(
         **TARGET, sources=[SRC_ORDERS], is_incremental=True, disable_hwm=True
     )
     sql = gen.to_sql()
-    _print("Incremental — disable_hwm=True (no time filter, still deduplicates via NOT IN)", sql)
+    write_sql("Incremental — disable_hwm=True (no time filter, still deduplicates via NOT IN)", sql)
     assert "max_ldts_per_rsrc_static_in_target" not in sql
     assert "distinct_target_hashkeys" in sql
     assert "records_to_insert" in sql
@@ -178,7 +164,7 @@ def test_hub_incremental_disable_hwm():
 # ---------------------------------------------------------------------------
 # 8. Full load — additional_columns carried through
 # ---------------------------------------------------------------------------
-def test_hub_additional_columns():
+def test_hub_additional_columns(write_sql):
     gen = HubGenerator(
         **TARGET,
         sources=[SRC_ORDERS],
@@ -186,7 +172,7 @@ def test_hub_additional_columns():
         additional_columns=["BATCH_ID", "FILE_NAME"],
     )
     sql = gen.to_sql()
-    _print("Full Load — additional_columns=[BATCH_ID, FILE_NAME]", sql)
+    write_sql("Full Load — additional_columns=[BATCH_ID, FILE_NAME]", sql)
     assert "BATCH_ID" in sql
     assert "FILE_NAME" in sql
 
@@ -194,7 +180,7 @@ def test_hub_additional_columns():
 # ---------------------------------------------------------------------------
 # 9. Config — custom ldts_alias propagates throughout
 # ---------------------------------------------------------------------------
-def test_hub_custom_ldts_alias():
+def test_hub_custom_ldts_alias(write_sql):
     config.ldts_alias = "load_ts"
     src = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
@@ -206,14 +192,14 @@ def test_hub_custom_ldts_alias():
         hashkey="hk_order",
         is_incremental=True,
     ).to_sql()
-    _print("Config — custom ldts_alias=load_ts", sql)
+    write_sql("Config — custom ldts_alias=load_ts", sql)
     assert "load_ts" in sql
 
 
 # ---------------------------------------------------------------------------
 # 10. Config — custom rsrc_alias propagates throughout
 # ---------------------------------------------------------------------------
-def test_hub_custom_rsrc_alias():
+def test_hub_custom_rsrc_alias(write_sql):
     config.rsrc_alias = "rec_src"
     src = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
@@ -224,5 +210,5 @@ def test_hub_custom_rsrc_alias():
         sources=[src],
         hashkey="hk_order",
     ).to_sql()
-    _print("Config — custom rsrc_alias=rec_src", sql)
+    write_sql("Config — custom rsrc_alias=rec_src", sql)
     assert "rec_src" in sql

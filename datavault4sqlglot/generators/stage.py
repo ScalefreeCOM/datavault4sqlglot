@@ -6,32 +6,17 @@ from sqlglot import exp, parse_one
 
 from datavault4sqlglot.generators.base import BaseGenerator
 from datavault4sqlglot.metadata import StageModel
-from datavault4sqlglot.metadata.source import ColumnDefinition
 from datavault4sqlglot.config import config
-
-# Datatype families for ghost record value selection (datavault4dbt convention)
-_STRING_TYPES = frozenset({
-    "VARCHAR", "CHAR", "NVARCHAR", "NCHAR", "TEXT", "STRING", "CHARACTER", "VARIANT",
-})
-_NUMERIC_TYPES = frozenset({
-    "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "BYTEINT",
-    "NUMBER", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "FLOAT4", "FLOAT8",
-})
-_DATE_TYPES = frozenset({
-    "DATE", "TIMESTAMP", "TIMESTAMP_NTZ", "TIMESTAMP_TZ", "TIMESTAMP_LTZ", "DATETIME", "TIME",
-})
-_BOOL_TYPES = frozenset({"BOOLEAN", "BOOL"})
 
 
 class StageGenerator(BaseGenerator):
     """
     Generates SQL for a Data Vault Stage (Hash) Layer.
 
-    Mirrors the dat<avault4dbt stage macro:
+    Mirrors the datavault4dbt stage macro:
     - source_data CTE with optional HWM incremental filter
     - derived_columns CTE
     - hashed_columns projection
-    - Optional ghost records (unknown + error) appended via UNION ALL on full loads
     """
 
     def __init__(
@@ -41,7 +26,6 @@ class StageGenerator(BaseGenerator):
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
-        enable_ghost_records: bool = False,
         end_of_all_times: Optional[str] = None,
         beginning_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None,
@@ -49,7 +33,6 @@ class StageGenerator(BaseGenerator):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.source_model = source_model
         self.is_incremental = is_incremental
-        self.enable_ghost_records = enable_ghost_records
         self.end_of_all_times = end_of_all_times or config.end_of_all_times
         self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
@@ -158,16 +141,6 @@ class StageGenerator(BaseGenerator):
             # the ldts column from SELECT * is still accessible in the WHERE clause.
             main_query = main_query.where(hwm_cond)
 
-        # ---------------------------------------------------------
-        # 4. Ghost records (only on full loads, mirroring datavault4dbt)
-        # ---------------------------------------------------------
-        if self.enable_ghost_records and not self.is_incremental:
-            unknown_row = self._build_ghost_row(is_unknown=True)
-            error_row = self._build_ghost_row(is_unknown=False)
-            if unknown_row and error_row:
-                ghost_union = unknown_row.union(error_row, distinct=False)
-                main_query = main_query.union(ghost_union, distinct=False)
-
         return main_query
 
     # ------------------------------------------------------------------
@@ -188,51 +161,3 @@ class StageGenerator(BaseGenerator):
             exp.Subquery(this=source_query, alias=exp.TableAlias(this=exp.Identifier(this="_src")))
         )
 
-    def _build_ghost_row(self, is_unknown: bool) -> Optional[exp.Select]:
-        """
-        Build one ghost record row (unknown or error) for known hash columns.
-
-        Only generates values for hashed columns, ldts, and rsrc.
-        All other columns are omitted — suitable when include_source_columns=False
-        and all relevant columns are declared in hashed_columns / derived_columns.
-        Returns None when no hash columns are defined.
-        """
-        if not self.source_model.hashed_columns:
-            return None
-
-        hex_len = 64 if config.hash.upper() == "SHA256" else 32
-        hash_val = "0" * hex_len if is_unknown else "f" * hex_len
-        ldts_val = self.beginning_of_all_times if is_unknown else self.end_of_all_times
-        rsrc_val = config.default_unknown_rsrc if is_unknown else config.default_error_rsrc
-
-        selection: list[exp.Expression] = []
-
-        # Hash columns
-        for alias in self.source_model.hashed_columns:
-            selection.append(
-                exp.Literal.string(hash_val).as_(
-                    exp.Identifier(this=alias, quoted=True)
-                )
-            )
-
-        # ldts / rsrc — include when they come from derived columns
-        if self.source_model.derived_columns:
-            for alias in self.source_model.derived_columns:
-                if alias in (config.ldts_alias, self.source_model.load_date_col or ""):
-                    selection.append(
-                        exp.Literal.string(ldts_val).as_(
-                            exp.Identifier(this=alias, quoted=True)
-                        )
-                    )
-                elif alias in (config.rsrc_alias, self.source_model.record_source_col or ""):
-                    selection.append(
-                        exp.Literal.string(rsrc_val).as_(
-                            exp.Identifier(this=alias, quoted=True)
-                        )
-                    )
-                else:
-                    selection.append(
-                        exp.null().as_(exp.Identifier(this=alias, quoted=True))
-                    )
-
-        return exp.select(*selection) if selection else None

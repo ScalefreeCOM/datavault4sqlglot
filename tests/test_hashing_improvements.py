@@ -16,7 +16,7 @@ def test_hashing_improvements():
     # 1. Column identifiers are quoted
     assert '"order_id"' in sql
 
-    # 2. NULL columns return the ghost-record sentinel '^^' (COALESCE, not NULLIF)
+    # 2. NULL columns are replaced with the '^^' null-string placeholder via COALESCE
     assert "COALESCE" in sql
 
     # 3. Special characters stripped via REGEXP_REPLACE + CHR() calls

@@ -4,24 +4,10 @@ Run with:  pytest tests/test_link.py -v -s
 """
 from __future__ import annotations
 
-import inspect
-from pathlib import Path
-
 import pytest
 
 from datavault4sqlglot.generators.link import LinkGenerator
 from datavault4sqlglot.metadata import SourceBinding, SourceModel
-
-_OUT_DIR = Path(__file__).parent.parent / "temp_sql"
-
-
-def _print(label: str, sql: str) -> None:
-    _OUT_DIR.mkdir(parents=True, exist_ok=True)
-    caller = inspect.currentframe().f_back.f_code.co_name
-    (_OUT_DIR / f"{caller}.sql").write_text(
-        f"-- LINK -- {label}\n\n{sql}\n", encoding="utf-8"
-    )
-    print(f"\n{'='*70}\nLINK -- {label}\n{'='*70}\n{sql}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -77,10 +63,10 @@ TARGET = dict(
 # ---------------------------------------------------------------------------
 # 1. Full load — single source
 # ---------------------------------------------------------------------------
-def test_link_full_load_single_source():
+def test_link_full_load_single_source(write_sql):
     gen = LinkGenerator(**TARGET, sources=[SRC_ORDERS], is_incremental=False)
     sql = gen.to_sql()
-    _print("Full Load — Single Source", sql)
+    write_sql("Full Load — Single Source", sql)
     assert "HK_ORDER_H" in sql
     assert "HK_CUSTOMER_H" in sql
     assert "earliest_hk_over_all_sources" in sql
@@ -90,10 +76,10 @@ def test_link_full_load_single_source():
 # ---------------------------------------------------------------------------
 # 2. Incremental — single source, no rsrc_static → global HWM (COALESCE MAX)
 # ---------------------------------------------------------------------------
-def test_link_incremental_single_source():
+def test_link_incremental_single_source(write_sql):
     gen = LinkGenerator(**TARGET, sources=[SRC_ORDERS], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Single Source, no rsrc_static (global HWM)", sql)
+    write_sql("Incremental — Single Source, no rsrc_static (global HWM)", sql)
     assert "distinct_target_hashkeys" in sql
     assert "MAX" in sql
     assert "COALESCE" in sql
@@ -102,10 +88,10 @@ def test_link_incremental_single_source():
 # ---------------------------------------------------------------------------
 # 3. Incremental — single source, rsrc_static → per-source HWM
 # ---------------------------------------------------------------------------
-def test_link_incremental_rsrc_static():
+def test_link_incremental_rsrc_static(write_sql):
     gen = LinkGenerator(**TARGET, sources=[SRC_SAP], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Single Source, rsrc_static=SAP/ORDERS (per-source HWM)", sql)
+    write_sql("Incremental — Single Source, rsrc_static=SAP/ORDERS (per-source HWM)", sql)
     assert "max_ldts_per_rsrc_static_in_target" in sql
     assert "SAP/ORDERS" in sql
     assert "COALESCE" in sql
@@ -114,10 +100,10 @@ def test_link_incremental_rsrc_static():
 # ---------------------------------------------------------------------------
 # 4. Incremental — multi source, all rsrc_static → per-source HWM
 # ---------------------------------------------------------------------------
-def test_link_incremental_multi_source_rsrc_static():
+def test_link_incremental_multi_source_rsrc_static(write_sql):
     gen = LinkGenerator(**TARGET, sources=[SRC_SAP, SRC_WEB], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Multi Source (SAP + WEB), per-source HWM", sql)
+    write_sql("Incremental — Multi Source (SAP + WEB), per-source HWM", sql)
     assert "source_new_union" in sql
     assert "SAP/ORDERS" in sql
     assert "WEB/%" in sql
@@ -126,7 +112,7 @@ def test_link_incremental_multi_source_rsrc_static():
 # ---------------------------------------------------------------------------
 # 5. Incremental — multi source, no rsrc_static → no time filter
 # ---------------------------------------------------------------------------
-def test_link_incremental_multi_source_no_rsrc_static():
+def test_link_incremental_multi_source_no_rsrc_static(write_sql):
     src_a = SourceBinding(
         source=SourceModel(table_name="STG_A"),
         hash_key_col="HK_ORDER_CUSTOMER_L",
@@ -139,7 +125,7 @@ def test_link_incremental_multi_source_no_rsrc_static():
     )
     gen = LinkGenerator(**TARGET, sources=[src_a, src_b], is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — Multi Source, no rsrc_static (no HWM, only NOT IN dedup)", sql)
+    write_sql("Incremental — Multi Source, no rsrc_static (no HWM, only NOT IN dedup)", sql)
     assert "max_ldts_per_rsrc_static_in_target" not in sql
     assert "distinct_target_hashkeys" in sql
 
@@ -147,12 +133,12 @@ def test_link_incremental_multi_source_no_rsrc_static():
 # ---------------------------------------------------------------------------
 # 6. Incremental — disable_hwm → skip HWM, keep NOT IN dedup
 # ---------------------------------------------------------------------------
-def test_link_incremental_disable_hwm():
+def test_link_incremental_disable_hwm(write_sql):
     gen = LinkGenerator(
         **TARGET, sources=[SRC_ORDERS], is_incremental=True, disable_hwm=True
     )
     sql = gen.to_sql()
-    _print("Incremental — disable_hwm=True (NOT IN only, no time filter)", sql)
+    write_sql("Incremental — disable_hwm=True (NOT IN only, no time filter)", sql)
     assert "max_ldts_per_rsrc_static_in_target" not in sql
     assert "distinct_target_hashkeys" in sql
 
@@ -160,7 +146,7 @@ def test_link_incremental_disable_hwm():
 # ---------------------------------------------------------------------------
 # 7. Full load — additional columns
 # ---------------------------------------------------------------------------
-def test_link_additional_columns():
+def test_link_additional_columns(write_sql):
     gen = LinkGenerator(
         **TARGET,
         sources=[SRC_ORDERS],
@@ -168,7 +154,7 @@ def test_link_additional_columns():
         additional_columns=["BATCH_ID"],
     )
     sql = gen.to_sql()
-    _print("Full Load — additional_columns=[BATCH_ID]", sql)
+    write_sql("Full Load — additional_columns=[BATCH_ID]", sql)
     assert "BATCH_ID" in sql
 
 

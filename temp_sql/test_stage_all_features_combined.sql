@@ -1,4 +1,4 @@
--- STAGE -- All Features Combined — hashkeys + hashdiff + derived + missing_columns + sequence + ghost
+-- STAGE -- All Features Combined — hashkeys + hashdiff + derived + missing_columns + sequence
 
 WITH derived_columns_cte AS (
   SELECT
@@ -157,17 +157,3 @@ SELECT
   CAST(NULL AS VARCHAR) AS "LEGACY_REGION",
   ROW_NUMBER() OVER () AS "SEQ_NUM"
 FROM "derived_columns_cte"
-UNION ALL
-SELECT
-  '00000000000000000000000000000000' AS "HK_ORDER_H",
-  '00000000000000000000000000000000' AS "HK_CUSTOMER_H",
-  '00000000000000000000000000000000' AS "HD_ORDER_DETAILS",
-  NULL AS "LOAD_DATE",
-  NULL AS "RECORD_SOURCE"
-UNION ALL
-SELECT
-  'ffffffffffffffffffffffffffffffff' AS "HK_ORDER_H",
-  'ffffffffffffffffffffffffffffffff' AS "HK_CUSTOMER_H",
-  'ffffffffffffffffffffffffffffffff' AS "HD_ORDER_DETAILS",
-  NULL AS "LOAD_DATE",
-  NULL AS "RECORD_SOURCE"

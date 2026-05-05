@@ -4,23 +4,9 @@ Run with:  pytest tests/test_satellite.py -v -s
 """
 from __future__ import annotations
 
-import inspect
-from pathlib import Path
-
 from datavault4sqlglot.config import config
 from datavault4sqlglot.generators.satellite import SatelliteGenerator
 from datavault4sqlglot.metadata import SourceModel
-
-_OUT_DIR = Path(__file__).parent.parent / "temp_sql"
-
-
-def _print(label: str, sql: str) -> None:
-    _OUT_DIR.mkdir(parents=True, exist_ok=True)
-    caller = inspect.currentframe().f_back.f_code.co_name
-    (_OUT_DIR / f"{caller}.sql").write_text(
-        f"-- SAT v0 -- {label}\n\n{sql}\n", encoding="utf-8"
-    )
-    print(f"\n{'='*70}\nSAT v0 -- {label}\n{'='*70}\n{sql}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -48,10 +34,10 @@ TARGET = dict(
 # ---------------------------------------------------------------------------
 # 1. Full load — LAG/QUALIFY dedup, no incremental CTEs
 # ---------------------------------------------------------------------------
-def test_sat_v0_full_load():
+def test_sat_v0_full_load(write_sql):
     gen = SatelliteGenerator(**TARGET, source_model=SRC, is_incremental=False)
     sql = gen.to_sql()
-    _print("Full Load (LAG dedup, no incremental CTEs)", sql)
+    write_sql("Full Load (LAG dedup, no incremental CTEs)", sql)
     assert "deduplicated_numbered_source" in sql
     assert "LAG" in sql
     assert "QUALIFY" in sql
@@ -62,10 +48,10 @@ def test_sat_v0_full_load():
 # ---------------------------------------------------------------------------
 # 2. Incremental — global HWM (COALESCE MAX from target) + NOT EXISTS dedup
 # ---------------------------------------------------------------------------
-def test_sat_v0_incremental_global_hwm():
+def test_sat_v0_incremental_global_hwm(write_sql):
     gen = SatelliteGenerator(**TARGET, source_model=SRC, is_incremental=True)
     sql = gen.to_sql()
-    _print("Incremental — global HWM (COALESCE MAX from target)", sql)
+    write_sql("Incremental — global HWM (COALESCE MAX from target)", sql)
     assert "latest_entries_in_sat" in sql
     assert "NOT EXISTS" in sql
     assert "records_to_insert" in sql
@@ -75,12 +61,12 @@ def test_sat_v0_incremental_global_hwm():
 # ---------------------------------------------------------------------------
 # 3. Incremental — disable_hwm → skip time filter, keep NOT EXISTS
 # ---------------------------------------------------------------------------
-def test_sat_v0_incremental_disable_hwm():
+def test_sat_v0_incremental_disable_hwm(write_sql):
     gen = SatelliteGenerator(
         **TARGET, source_model=SRC, is_incremental=True, disable_hwm=True
     )
     sql = gen.to_sql()
-    _print("Incremental — disable_hwm=True (no time filter, NOT EXISTS only)", sql)
+    write_sql("Incremental — disable_hwm=True (no time filter, NOT EXISTS only)", sql)
     assert "COALESCE" not in sql
     assert "latest_entries_in_sat" in sql
     assert "records_to_insert" in sql
@@ -89,7 +75,7 @@ def test_sat_v0_incremental_disable_hwm():
 # ---------------------------------------------------------------------------
 # 4. hash_diff as dict {source_column, alias}
 # ---------------------------------------------------------------------------
-def test_sat_v0_hash_diff_dict():
+def test_sat_v0_hash_diff_dict(write_sql):
     gen = SatelliteGenerator(
         target_database="DV_DB",
         target_schema="RAW_VAULT",
@@ -101,7 +87,7 @@ def test_sat_v0_hash_diff_dict():
         is_incremental=False,
     )
     sql = gen.to_sql()
-    _print("hash_diff as dict {source_column: RAW_HASHDIFF, alias: HD_ORDER_DETAILS}", sql)
+    write_sql("hash_diff as dict {source_column: RAW_HASHDIFF, alias: HD_ORDER_DETAILS}", sql)
     assert "RAW_HASHDIFF" in sql
     assert "HD_ORDER_DETAILS" in sql
 
@@ -109,7 +95,7 @@ def test_sat_v0_hash_diff_dict():
 # ---------------------------------------------------------------------------
 # 5. Additional columns
 # ---------------------------------------------------------------------------
-def test_sat_v0_additional_columns():
+def test_sat_v0_additional_columns(write_sql):
     gen = SatelliteGenerator(
         **TARGET,
         source_model=SRC,
@@ -117,14 +103,14 @@ def test_sat_v0_additional_columns():
         additional_columns=["BATCH_ID"],
     )
     sql = gen.to_sql()
-    _print("Full Load — additional_columns=[BATCH_ID]", sql)
+    write_sql("Full Load — additional_columns=[BATCH_ID]", sql)
     assert "BATCH_ID" in sql
 
 
 # ---------------------------------------------------------------------------
 # 6. Config — custom ldts_alias propagates
 # ---------------------------------------------------------------------------
-def test_sat_v0_custom_ldts_alias():
+def test_sat_v0_custom_ldts_alias(write_sql):
     config.ldts_alias = "load_ts"
     src = SourceModel(table_name="stg_orders")
     sql = SatelliteGenerator(
@@ -134,14 +120,14 @@ def test_sat_v0_custom_ldts_alias():
         hash_diff="hashdiff",
         is_incremental=True,
     ).to_sql()
-    _print("Config — custom ldts_alias=load_ts", sql)
+    write_sql("Config — custom ldts_alias=load_ts", sql)
     assert "load_ts" in sql
 
 
 # ---------------------------------------------------------------------------
 # 7. Config — custom rsrc_alias propagates
 # ---------------------------------------------------------------------------
-def test_sat_v0_custom_rsrc_alias():
+def test_sat_v0_custom_rsrc_alias(write_sql):
     config.rsrc_alias = "rec_src"
     src = SourceModel(table_name="stg_orders")
     sql = SatelliteGenerator(
@@ -150,5 +136,5 @@ def test_sat_v0_custom_rsrc_alias():
         parent_hash_key="hk_order",
         hash_diff="hashdiff",
     ).to_sql()
-    _print("Config — custom rsrc_alias=rec_src", sql)
+    write_sql("Config — custom rsrc_alias=rec_src", sql)
     assert "rec_src" in sql

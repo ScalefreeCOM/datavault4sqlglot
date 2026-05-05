@@ -205,7 +205,7 @@ class BaseGenerator(ABC):
         quote = exp.Literal.string(r'\"')
         quoted_col = exp.Concat(expressions=[quote, c, quote])
         
-        # 5. Return '^^' ghost-record sentinel when column is NULL
+        # 5. Return '^^' null-string placeholder when column is NULL
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
 
     def _build_hash_expression(
