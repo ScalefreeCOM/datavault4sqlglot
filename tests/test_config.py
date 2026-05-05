@@ -16,11 +16,15 @@ def test_config_override():
             load_date_col="LOAD_TS",
             record_source_col="RECORD_SRC",
         ),
-        business_keys=["ORDER_ID"],
     )
 
     # 3. Generate Hub SQL with defaults
-    gen = HubGenerator(target_table="HUB_ORDERS", sources=[source], hashkey="HK_ORDERS")
+    gen = HubGenerator(
+        target_table="HUB_ORDERS",
+        sources=[source],
+        hashkey="HK_ORDERS",
+        business_keys=["ORDER_ID"],
+    )
     sql_default = gen.generate_sql().sql()
     
     assert "ldts" in sql_default

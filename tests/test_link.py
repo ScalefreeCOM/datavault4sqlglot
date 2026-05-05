@@ -173,3 +173,100 @@ def test_link_fk_validation_raises():
     )
     with pytest.raises(ValueError, match="at least 2 foreign_hash_keys"):
         gen.generate_sql()
+
+
+# ---------------------------------------------------------------------------
+# 9. Incremental — single source, multiple rsrc_statics → one HWM branch each
+# ---------------------------------------------------------------------------
+def test_link_incremental_single_source_multiple_rsrc_statics(write_sql):
+    """
+    A single source carrying rows from N record-source patterns must produce:
+      • N branches in the HWM CTE (one MAX(ldts) per pattern), and
+      • N OR branches in the src_new_0 WHERE (one strict-GT filter per pattern),
+    so each pattern's high-water-mark advances independently. Mirrors the Hub
+    behaviour — both delegate to the same helpers in base.py.
+    """
+    src = SourceBinding(
+        source=SourceModel(
+            database="RAW_DB", schema="STAGE", table_name="STG_SAP_ORDERS",
+            load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
+        ),
+        hash_key_col="HK_ORDER_CUSTOMER_L",
+        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
+        rsrc_statics=["SAP/ORDERS", "SAP/ARCHIVE", "SAP/EXT"],
+    )
+    gen = LinkGenerator(**TARGET, sources=[src], is_incremental=True)
+    sql = gen.to_sql()
+    write_sql(
+        "Incremental — Single Source, multiple rsrc_statics (per-pattern HWM)",
+        sql,
+    )
+
+    # All three patterns appear in the rendered SQL.
+    for static in ("SAP/ORDERS", "SAP/ARCHIVE", "SAP/EXT"):
+        assert static in sql, f"missing rsrc_static literal {static!r}"
+
+    # HWM CTE present and built as a UNION ALL of N=3 per-pattern branches.
+    # Single source → no source-level UNION, so all UNION ALLs come from the
+    # HWM CTE: 3 branches → exactly 2 UNION ALL operators.
+    assert "max_ldts_per_rsrc_static_in_target" in sql
+    assert sql.upper().count("UNION ALL") == 2
+
+
+# ---------------------------------------------------------------------------
+# 10. Incremental — multi source × multi rsrc_statics → cross-product HWM
+# ---------------------------------------------------------------------------
+def test_link_incremental_multi_source_multi_rsrc_statics(write_sql):
+    """
+    Cross-product case: two sources, each carrying rows from multiple record-
+    source patterns. The HWM CTE iterates ``for binding in sources: for sv in
+    binding.rsrc_statics`` (see base.py:106), so the total branch count must
+    equal the sum of statics across all bindings — and each per-source CTE
+    keeps its own pattern set in the WHERE clause.
+    """
+    sap = SourceBinding(
+        source=SourceModel(
+            database="RAW_DB", schema="STAGE", table_name="STG_SAP_ORDERS",
+            load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
+        ),
+        hash_key_col="HK_ORDER_CUSTOMER_L",
+        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
+        rsrc_statics=["SAP/ORDERS", "SAP/ARCHIVE"],
+    )
+    web = SourceBinding(
+        source=SourceModel(
+            database="RAW_DB", schema="STAGE", table_name="STG_WEB_ORDERS",
+            load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
+        ),
+        hash_key_col="HK_ORDER_CUSTOMER_L",
+        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
+        rsrc_statics=["WEB/EU/%", "WEB/US/%"],
+    )
+    gen = LinkGenerator(**TARGET, sources=[sap, web], is_incremental=True)
+    sql = gen.to_sql()
+    write_sql(
+        "Incremental — Multi Source × Multi rsrc_statics (cross-product HWM)",
+        sql,
+    )
+
+    # All four pattern literals appear.
+    for static in ("SAP/ORDERS", "SAP/ARCHIVE", "WEB/EU/%", "WEB/US/%"):
+        assert static in sql, f"missing rsrc_static literal {static!r}"
+
+    # HWM CTE: 4 branches (sum across sources) → 3 UNION ALLs.
+    # Source-level union: 2 sources → 1 UNION ALL.
+    # Total UNION ALL keywords = 4.
+    assert "max_ldts_per_rsrc_static_in_target" in sql
+    assert "source_new_union" in sql
+    assert sql.upper().count("UNION ALL") == 4
+
+    # Each per-source CTE must reference *its own* patterns — never the other
+    # source's. Protects against a cross-binding leak in the OR-filter builder.
+    src0 = sql.split("src_new_0")[1].split("src_new_1")[0]
+    src1 = sql.split("src_new_1")[1].split("source_new_union")[0]
+    for sap_static in ("SAP/ORDERS", "SAP/ARCHIVE"):
+        assert sap_static in src0, f"src_new_0 missing {sap_static!r}"
+        assert sap_static not in src1, f"src_new_1 leaked {sap_static!r}"
+    for web_static in ("WEB/EU/%", "WEB/US/%"):
+        assert web_static in src1, f"src_new_1 missing {web_static!r}"
+        assert web_static not in src0, f"src_new_0 leaked {web_static!r}"

@@ -38,13 +38,13 @@ def _stage_sql(dialect: str) -> str:
 def _hub_sql(dialect: str, *, incremental: bool = False) -> str:
     binding = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
-        business_keys=["order_id"],
         rsrc_statics=["ERP/ORDERS"] if incremental else None,
     )
     return HubGenerator(
         target_table="hub_order",
         sources=[binding],
         hashkey="hk_order_h",
+        business_keys=["order_id"],
         is_incremental=incremental,
         dialect=dialect,
     ).to_sql()

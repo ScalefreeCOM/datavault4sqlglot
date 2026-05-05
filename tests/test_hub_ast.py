@@ -32,14 +32,13 @@ def _find_cte(tree: exp.Expression, alias: str) -> exp.CTE | None:
     return None
 
 
-def _binding(table: str, bk: str = "ORDER_ID", *, statics: list[str] | None = None) -> SourceBinding:
+def _binding(table: str, *, statics: list[str] | None = None) -> SourceBinding:
     return SourceBinding(
         source=SourceModel(
             table_name=table,
             load_date_col="LOAD_DATE",
             record_source_col="RECORD_SOURCE",
         ),
-        business_keys=[bk],
         rsrc_statics=statics,
     )
 
@@ -56,6 +55,7 @@ def test_rsrc_static_hwm_cte_has_one_branch_per_static():
             _binding("STG_WEB", statics=["WEB/%"]),
         ],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
     )
     tree = _parse(gen.to_sql())
@@ -76,6 +76,7 @@ def test_rsrc_static_hwm_branch_uses_like_not_equals():
         target_table="HUB_ORDER",
         sources=[_binding("STG_WEB", statics=["WEB/%"])],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
     )
     tree = _parse(gen.to_sql())
@@ -94,6 +95,7 @@ def test_src_new_filter_uses_strict_gt_not_gte():
         target_table="HUB_ORDER",
         sources=[_binding("STG_SAP", statics=["SAP/ORDERS"])],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
     )
     tree = _parse(gen.to_sql())
@@ -117,6 +119,7 @@ def test_src_new_filter_coalesces_with_beginning_of_all_times():
         target_table="HUB_ORDER",
         sources=[_binding("STG_SAP", statics=["SAP/ORDERS"])],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
         beginning_of_all_times=boa,
     )
@@ -139,6 +142,7 @@ def test_src_new_filter_branch_count_matches_statics():
         target_table="HUB_ORDER",
         sources=[_binding("STG_SAP", statics=["SAP/ORDERS", "SAP/ARCHIVE", "SAP/EXT"])],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
     )
     tree = _parse(gen.to_sql())
@@ -161,6 +165,7 @@ def test_single_source_no_static_uses_direct_target_hwm():
         target_table="HUB_ORDER",
         sources=[_binding("STG_ORDERS")],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=True,
     )
     tree = _parse(gen.to_sql())
@@ -187,6 +192,7 @@ def test_dedup_window_partitions_by_hashkey_orders_by_ldts():
         target_table="HUB_ORDER",
         sources=[_binding("STG_ORDERS")],
         hashkey="HK_ORDER_H",
+        business_keys=["ORDER_ID"],
         is_incremental=False,
     )
     tree = _parse(gen.to_sql())

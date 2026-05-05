@@ -50,11 +50,14 @@ SourceModel(
 ---
 SourceBinding — wraps a SourceModel with DV-loading intent
 
-Answers what to extract from that staged table for a specific vault entity: which columns are business keys, which are foreign hash keys (for links), what the rsrc_statics are for HWM scoping, etc. A single SourceModel can be wrapped in different SourceBindings for different vault entities.
+Answers what to extract from that staged table for a specific vault entity: per-source physical bk_columns (when they differ from the hub's canonical names), foreign hash keys (for links), rsrc_statics for HWM scoping, etc. A single SourceModel can be wrapped in different SourceBindings for different vault entities.
+
+The hub-level *canonical* business_keys live on HubGenerator itself (not on the binding) — every binding into the same hub maps onto that same canonical name set.
 
 SourceBinding(
-    source=_SRC_ORDERS_MODEL,   # ← the SourceModel
-    business_keys=["ORDER_ID"],
+    source=_SRC_ORDERS_MODEL,        # ← the SourceModel
+    bk_columns=["SAP_ORDER_ID"],     # only needed when the source's column
+                                     #   name differs from the hub canonical
     rsrc_statics=["ERP/ORDERS"],
 )
 

@@ -75,7 +75,10 @@ class SourceBinding:
 
     Attributes:
         source:            Physical table reference.
-        business_keys:     Source columns that form the hub business key.
+        bk_columns:        Per-source physical business-key columns. They map
+                           positionally to the hub-level ``business_keys``.
+                           When omitted, the source is assumed to already use
+                           the canonical names declared on ``HubGenerator``.
         foreign_hash_keys: Source columns that are foreign hash keys (Links).
         hash_key_col:      Source column carrying the entity's hash key.
                            Defaults to the generator's own hash-key parameter.
@@ -85,7 +88,7 @@ class SourceBinding:
     """
 
     source: SourceModel
-    business_keys: list[str] = field(default_factory=list)
+    bk_columns: Optional[list[str]] = None
     foreign_hash_keys: list[str] = field(default_factory=list)
     hash_key_col: Optional[str] = None
     payload: list[str] = field(default_factory=list)

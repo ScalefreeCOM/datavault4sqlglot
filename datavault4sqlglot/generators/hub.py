@@ -17,6 +17,7 @@ class HubGenerator(BaseGenerator):
         target_table: str,
         sources: List[SourceBinding],
         hashkey: str,
+        business_keys: List[str],
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
@@ -29,11 +30,23 @@ class HubGenerator(BaseGenerator):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.sources = sources
         self.hashkey = hashkey
+        self.business_keys = business_keys
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.additional_columns = additional_columns or []
         self.end_of_all_times = end_of_all_times or config.end_of_all_times
         self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
+
+        # Per-source bk_columns must match the canonical hub-level
+        # business_keys positionally. Catch length mismatches at construction
+        # time so we never emit a malformed UNION downstream.
+        for idx, binding in enumerate(self.sources):
+            if binding.bk_columns is not None and len(binding.bk_columns) != len(self.business_keys):
+                raise ValueError(
+                    f"HubGenerator: sources[{idx}].bk_columns has "
+                    f"length {len(binding.bk_columns)}, but the hub has "
+                    f"{len(self.business_keys)} business_keys."
+                )
 
     def generate_sql(self) -> exp.Expression:
         hashkey_col = self.hashkey
@@ -76,8 +89,15 @@ class HubGenerator(BaseGenerator):
             extra_cols = binding.additional_columns or self.additional_columns
 
             select_exprs = [exp.column(src_hk).as_(hashkey_col)]
-            for bk in binding.business_keys:
-                select_exprs.append(exp.column(bk))
+            # Per-source business-key columns are aliased positionally to the
+            # canonical hub-level names, so multi-source UNIONs line up by name
+            # (not just by position) regardless of physical naming differences.
+            src_bk_cols = binding.bk_columns or self.business_keys
+            for src_col, target_col in zip(src_bk_cols, self.business_keys):
+                col_expr = exp.column(src_col)
+                if src_col != target_col:
+                    col_expr = col_expr.as_(target_col)
+                select_exprs.append(col_expr)
             for col in extra_cols:
                 select_exprs.append(exp.column(col))
             select_exprs.append(exp.column(src_ldts).as_(ldts_col))
