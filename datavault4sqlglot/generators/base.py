@@ -218,6 +218,57 @@ class BaseGenerator(ABC):
         # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
 
+    def _dialect_hash(self, inner: exp.Expression, algorithm: str) -> exp.Expression:
+        """
+        Returns LOWER(hash_func(inner)) using the hash function appropriate for the active
+        dialect.  Handles databases that lack a native MD5() function.
+
+        Algorithm is 'MD5' or 'SHA256' (from config.hash).
+        """
+        dialect = (self.dialect or "").lower()
+        alg = algorithm.upper()
+        hex_len = 64 if alg in ("SHA256", "SHA2") else 32
+
+        if dialect in ("tsql", "synapse"):
+            # T-SQL: LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', inner), 2))
+            tsql_alg = "SHA2_256" if alg == "SHA256" else "MD5"
+            hb = exp.Anonymous(this="HASHBYTES", expressions=[
+                exp.Literal.string(tsql_alg), inner
+            ])
+            converted = exp.Anonymous(this="CONVERT", expressions=[
+                exp.DataType.build(f"VARCHAR({hex_len})"), hb, exp.Literal.number(2)
+            ])
+            return exp.Lower(this=converted)
+
+        elif dialect == "oracle":
+            # Oracle: LOWER(CAST(STANDARD_HASH(inner, 'MD5') AS VARCHAR2(40)))
+            oracle_alg = "SHA256" if alg == "SHA256" else "MD5"
+            sh = exp.Anonymous(this="STANDARD_HASH", expressions=[
+                inner, exp.Literal.string(oracle_alg)
+            ])
+            return exp.Lower(this=exp.Cast(this=sh, to=exp.DataType.build(f"VARCHAR2({hex_len})")))
+
+        elif dialect == "bigquery":
+            # BigQuery: MD5/SHA256 return BYTES — must wrap in TO_HEX
+            if alg == "SHA256":
+                hash_inner = exp.SHA2(this=inner, length=exp.Literal.number(256))
+            else:
+                hash_inner = exp.MD5(this=inner)
+            return exp.Lower(this=exp.Anonymous(this="TO_HEX", expressions=[hash_inner]))
+
+        else:
+            # Snowflake, Postgres, Redshift, Databricks, Exasol — standard functions
+            if alg == "SHA256":
+                h: exp.Expression = exp.SHA2(this=inner, length=exp.Literal.number(256))
+            elif hasattr(exp, alg):
+                h = getattr(exp, alg)(this=inner)
+            else:
+                logging.warning(
+                    f"Hash algorithm '{alg}' not natively supported by sqlglot.exp. Defaulting to MD5."
+                )
+                h = exp.MD5(this=inner)
+            return exp.Lower(this=h)
+
     def _build_hash_expression(
         self, 
         columns: list[str],
@@ -273,20 +324,9 @@ class BaseGenerator(ABC):
              expression=exp.Literal.string(null_check_string)
         )
         
-        # Hash Function Selection
         hash_alg = config.hash.upper()
-        if hash_alg == "SHA256":
-            hash_expr = exp.SHA2(this=nullif_block, length=exp.Literal.number(256))
-        elif hasattr(exp, hash_alg):
-            hash_func = getattr(exp, hash_alg)
-            hash_expr = hash_func(this=nullif_block)
-        else:
-            logging.warning(f"Hash algorithm '{hash_alg}' not natively supported by sqlglot.exp. Defaulting to MD5.")
-            hash_expr = exp.MD5(this=nullif_block)
-            
-        hash_expr = exp.Lower(this=hash_expr)
-        
-        # COALESCE(MD5(...), '0000...') — null BK input produces the all-zeros sentinel
-        # Hex length: MD5=32, SHA256=64
         hex_len = 64 if "SHA2" in hash_alg or "SHA256" in hash_alg else 32
-        return exp.Coalesce(this=hash_expr, expressions=[exp.Literal.string('0' * hex_len)])
+        return exp.Coalesce(
+            this=self._dialect_hash(nullif_block, hash_alg),
+            expressions=[exp.Literal.string('0' * hex_len)]
+        )
