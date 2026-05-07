@@ -19,7 +19,6 @@ def _gen(**kwargs: object) -> SatelliteV1Generator:
         sat_v0_table="sat_orders",
         parent_hash_key="hk_order",
         hash_diff="hashdiff",
-        payload=["status", "amount"],
     )
     defaults.update(kwargs)
     return SatelliteV1Generator(**defaults)
@@ -38,7 +37,6 @@ def test_sat_v1_default(write_sql):
         sat_v0_table="SAT_ORDER_DETAILS",
         parent_hash_key="HK_ORDER_H",
         hash_diff="HD_ORDER_DETAILS",
-        payload=["ORDER_STATUS", "TOTAL_PRICE", "ORDER_DATE"],
     )
     sql = gen.to_sql()
     write_sql("Default — LEAD window for ledts, is_current flag", sql)

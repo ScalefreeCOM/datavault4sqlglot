@@ -19,11 +19,13 @@ class SatelliteV1Generator(BaseGenerator):
                          end_of_all_times)
         is_current = CASE WHEN ledts = end_of_all_times THEN TRUE ELSE FALSE END
 
+    Every column from the underlying sat_v0 table is carried through via
+    ``SELECT *``; payload columns are not declared explicitly.
+
     Args:
         sat_v0_table: Source sat_v0 table name.
         parent_hash_key: Hash key column partitioning the satellite.
         hash_diff: Hash diff column name.
-        payload: Payload columns to carry through.
         add_is_current: Whether to add an IS_CURRENT boolean column.
         ledts_alias: Column name for the load-end-timestamp (default: ledts_alias from config).
         is_current_col: Column name for the is-current flag.
@@ -39,7 +41,6 @@ class SatelliteV1Generator(BaseGenerator):
         sat_v0_database: Optional[str] = None,
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
-        payload: Optional[list[str]] = None,
         add_is_current: bool = True,
         ledts_alias: Optional[str] = None,
         is_current_col: str = "is_current",
@@ -51,7 +52,6 @@ class SatelliteV1Generator(BaseGenerator):
         self.sat_v0_database = sat_v0_database
         self.parent_hash_key = parent_hash_key
         self.hash_diff = hash_diff
-        self.payload = payload or []
         self.add_is_current = add_is_current
         self.ledts_alias = ledts_alias or config.ledts_alias
         self.is_current_col = is_current_col

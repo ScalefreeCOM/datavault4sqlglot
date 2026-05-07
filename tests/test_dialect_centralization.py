@@ -84,7 +84,6 @@ def _sat_v1_sql(dialect: str) -> str:
         sat_v0_table="sat_order_details",
         parent_hash_key="hk_order_h",
         hash_diff="hd_order_details",
-        payload=["status", "amount"],
         dialect=dialect,
     ).to_sql()
 
