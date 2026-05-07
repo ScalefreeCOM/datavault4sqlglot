@@ -9,7 +9,8 @@
       "Bash(python -m pytest tests/models/test_advanced_model.py::test_ma_sat_v1_with_is_current tests/models/test_link_model.py::test_link_incremental_multi_source_no_rsrc_static -v --tb=short)",
       "Bash(python -m pytest tests/ -q)",
       "Bash(python -m pytest tests/test_edge_cases.py -v)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python *)"
     ]
   }
 }

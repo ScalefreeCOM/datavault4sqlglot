@@ -23,8 +23,6 @@ class HubGenerator(BaseGenerator):
         is_incremental: bool = False,
         disable_hwm: bool = False,
         additional_columns: Optional[List[str]] = None,
-        end_of_all_times: Optional[str] = None,
-        beginning_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None,
     ):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
@@ -34,8 +32,6 @@ class HubGenerator(BaseGenerator):
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.additional_columns = additional_columns or []
-        self.end_of_all_times = end_of_all_times or config.end_of_all_times
-        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
         # Per-source bk_columns must match the canonical hub-level
         # business_keys positionally. Catch length mismatches at construction
@@ -52,7 +48,8 @@ class HubGenerator(BaseGenerator):
         hashkey_col = self.hashkey
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
-        boa = self.beginning_of_all_times
+        boa = config.beginning_of_all_times
+        eoa = config.end_of_all_times
 
         target_exp = self._get_table_expression(
             self.target_table, self.target_schema, self.target_database
@@ -67,7 +64,7 @@ class HubGenerator(BaseGenerator):
 
         if self.is_incremental and not self.disable_hwm:
             hwm_query = self._build_rsrc_static_hwm_query(
-                self.sources, target_exp, ldts_col, rsrc_col, self.end_of_all_times
+                self.sources, target_exp, ldts_col, rsrc_col, eoa
             )
             if hwm_query is not None:
                 ctes[hwm_cte_name] = hwm_query
@@ -122,9 +119,7 @@ class HubGenerator(BaseGenerator):
                         )
                         .from_(target_exp)
                         .where(
-                            exp.column(ldts_col).neq(
-                                exp.Literal.string(self.end_of_all_times)
-                            )
+                            exp.column(ldts_col).neq(exp.Literal.string(eoa))
                         )
                     )
                     src_query = src_query.where(

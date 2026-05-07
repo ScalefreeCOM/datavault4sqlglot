@@ -115,13 +115,13 @@ def test_src_new_filter_uses_strict_gt_not_gte():
 def test_src_new_filter_coalesces_with_beginning_of_all_times():
     """Cold-start safety: COALESCE must wrap MAX with beginning_of_all_times."""
     boa = "1900-01-01"
+    config.beginning_of_all_times = boa
     gen = HubGenerator(
         target_table="HUB_ORDER",
         sources=[_binding("STG_SAP", statics=["SAP/ORDERS"])],
         hashkey="HK_ORDER_H",
         business_keys=["ORDER_ID"],
         is_incremental=True,
-        beginning_of_all_times=boa,
     )
     tree = _parse(gen.to_sql())
     src_cte = _find_cte(tree, "src_new_0")

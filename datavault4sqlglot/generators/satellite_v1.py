@@ -43,7 +43,6 @@ class SatelliteV1Generator(BaseGenerator):
         add_is_current: bool = True,
         ledts_alias: Optional[str] = None,
         is_current_col: str = "is_current",
-        end_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None,
     ) -> None:
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
@@ -56,7 +55,6 @@ class SatelliteV1Generator(BaseGenerator):
         self.add_is_current = add_is_current
         self.ledts_alias = ledts_alias or config.ledts_alias
         self.is_current_col = is_current_col
-        self.end_of_all_times = end_of_all_times or config.end_of_all_times
 
     def generate_sql(self) -> exp.Expression:
         parent_hk_col = self.parent_hash_key
@@ -64,7 +62,7 @@ class SatelliteV1Generator(BaseGenerator):
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
         ledts_col = self.ledts_alias
-        eoa = self.end_of_all_times
+        eoa = config.end_of_all_times
 
         src_exp = self._get_table_expression(
             self.sat_v0_table, self.sat_v0_schema, self.sat_v0_database

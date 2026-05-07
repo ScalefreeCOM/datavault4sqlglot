@@ -22,8 +22,6 @@ class LinkGenerator(BaseGenerator):
         is_incremental: bool = False,
         disable_hwm: bool = False,
         additional_columns: Optional[List[str]] = None,
-        end_of_all_times: Optional[str] = None,
-        beginning_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None
     ):
 
@@ -33,8 +31,6 @@ class LinkGenerator(BaseGenerator):
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.additional_columns = additional_columns or []
-        self.end_of_all_times = end_of_all_times or config.end_of_all_times
-        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
 
     def generate_sql(self) -> exp.Expression:
@@ -42,7 +38,8 @@ class LinkGenerator(BaseGenerator):
         hashkey_col = self.link_hash_key
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
-        boa = self.beginning_of_all_times
+        boa = config.beginning_of_all_times
+        eoa = config.end_of_all_times
 
         # Helper for target table
         target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
@@ -55,7 +52,7 @@ class LinkGenerator(BaseGenerator):
 
         if self.is_incremental and not self.disable_hwm:
             hwm_query = self._build_rsrc_static_hwm_query(
-                self.sources, target_exp, ldts_col, rsrc_col, self.end_of_all_times
+                self.sources, target_exp, ldts_col, rsrc_col, eoa
             )
             if hwm_query is not None:
                 ctes[hwm_cte_name] = hwm_query
@@ -109,7 +106,7 @@ class LinkGenerator(BaseGenerator):
                             )
                         )
                         .from_(target_exp)
-                        .where(exp.column(ldts_col).neq(exp.Literal.string(self.end_of_all_times)))
+                        .where(exp.column(ldts_col).neq(exp.Literal.string(eoa)))
                     )
                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
 
