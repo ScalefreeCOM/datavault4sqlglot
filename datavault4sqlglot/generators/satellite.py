@@ -38,7 +38,6 @@ class SatelliteGenerator(BaseGenerator):
         is_incremental: bool = False,
         disable_hwm: bool = False,
         source_is_single_batch: bool = False,
-        additional_columns: Optional[List[str]] = None,
         dialect: Optional[str] = None,
     ):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
@@ -49,7 +48,6 @@ class SatelliteGenerator(BaseGenerator):
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.source_is_single_batch = source_is_single_batch
-        self.additional_columns = additional_columns or []
 
     def generate_sql(self) -> exp.Expression:
         src = self.source_model
@@ -70,7 +68,6 @@ class SatelliteGenerator(BaseGenerator):
         src_parent_hk = parent_hk_col
         src_hd_src, _ = self._resolve_column_config(self.hash_diff)
         src_payload = self.payload
-        extra_cols = self.additional_columns
         src_ldts = src.load_date_col or ldts_col
         src_rsrc = src.record_source_col or rsrc_col
 
@@ -83,7 +80,6 @@ class SatelliteGenerator(BaseGenerator):
             exp.column(src_parent_hk).as_(parent_hk_col),
             exp.column(src_hd_src).as_(hash_diff_col),
             *[exp.column(p) for p in src_payload],
-            *[exp.column(col) for col in extra_cols],
             exp.column(src_ldts).as_(ldts_col),
             exp.column(src_rsrc).as_(rsrc_col),
         ]

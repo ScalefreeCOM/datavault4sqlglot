@@ -93,21 +93,6 @@ def test_sat_v0_hash_diff_dict(write_sql):
 
 
 # ---------------------------------------------------------------------------
-# 5. Additional columns
-# ---------------------------------------------------------------------------
-def test_sat_v0_additional_columns(write_sql):
-    gen = SatelliteGenerator(
-        **TARGET,
-        source_model=SRC,
-        is_incremental=False,
-        additional_columns=["BATCH_ID"],
-    )
-    sql = gen.to_sql()
-    write_sql("Full Load — additional_columns=[BATCH_ID]", sql)
-    assert "BATCH_ID" in sql
-
-
-# ---------------------------------------------------------------------------
 # 6. Config — custom ldts_alias propagates
 # ---------------------------------------------------------------------------
 def test_sat_v0_custom_ldts_alias(write_sql):
