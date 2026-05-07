@@ -79,7 +79,11 @@ class SourceBinding:
                            positionally to the hub-level ``business_keys``.
                            When omitted, the source is assumed to already use
                            the canonical names declared on ``HubGenerator``.
-        foreign_hash_keys: Source columns that are foreign hash keys (Links).
+        fk_columns:        Per-source physical foreign-hash-key columns. They
+                           map positionally to the link-level
+                           ``foreign_hash_keys``. When omitted, the source is
+                           assumed to already use the canonical names declared
+                           on ``LinkGenerator``.
         hash_key_col:      Source column carrying the entity's hash key.
                            Defaults to the generator's own hash-key parameter.
         payload:           Source columns to carry as satellite / NHLink payload.
@@ -89,7 +93,7 @@ class SourceBinding:
 
     source: SourceModel
     bk_columns: Optional[list[str]] = None
-    foreign_hash_keys: list[str] = field(default_factory=list)
+    fk_columns: Optional[list[str]] = None
     hash_key_col: Optional[str] = None
     payload: list[str] = field(default_factory=list)
     rsrc_statics: Optional[list[str]] = None

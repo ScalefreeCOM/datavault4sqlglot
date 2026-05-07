@@ -54,13 +54,13 @@ def _link_sql(dialect: str, *, incremental: bool = False) -> str:
     binding = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
         hash_key_col="hk_order_customer_l",
-        foreign_hash_keys=["hk_order_h", "hk_customer_h"],
         rsrc_statics=["ERP/ORDERS"] if incremental else None,
     )
     return LinkGenerator(
         target_table="lnk_order_customer",
         sources=[binding],
         link_hash_key="hk_order_customer_l",
+        foreign_hash_keys=["hk_order_h", "hk_customer_h"],
         is_incremental=incremental,
         dialect=dialect,
     ).to_sql()

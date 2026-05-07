@@ -17,6 +17,7 @@ class LinkGenerator(BaseGenerator):
         target_table: str,
         sources: List[SourceBinding],
         link_hash_key: str,
+        foreign_hash_keys: List[str],
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
@@ -28,9 +29,29 @@ class LinkGenerator(BaseGenerator):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.sources = sources
         self.link_hash_key = link_hash_key
+        self.foreign_hash_keys = foreign_hash_keys
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
         self.additional_columns = additional_columns or []
+
+        # By DV2 definition a Link relates two or more business entities — fail
+        # at construction so a malformed UNION never reaches downstream code.
+        if len(self.foreign_hash_keys) < 2:
+            raise ValueError(
+                f"LinkGenerator must declare at least 2 foreign_hash_keys, "
+                f"got {len(self.foreign_hash_keys)}."
+            )
+
+        # Per-source fk_columns must match the canonical foreign_hash_keys
+        # positionally. Catch length mismatches at construction time so we
+        # never emit a malformed UNION downstream.
+        for idx, binding in enumerate(self.sources):
+            if binding.fk_columns is not None and len(binding.fk_columns) != len(self.foreign_hash_keys):
+                raise ValueError(
+                    f"LinkGenerator: sources[{idx}].fk_columns has "
+                    f"length {len(binding.fk_columns)}, but the link has "
+                    f"{len(self.foreign_hash_keys)} foreign_hash_keys."
+                )
 
 
     def generate_sql(self) -> exp.Expression:
@@ -69,23 +90,26 @@ class LinkGenerator(BaseGenerator):
             src_link_hk = binding.hash_key_col or hashkey_col
             src_ldts = src.load_date_col or ldts_col
             src_rsrc = src.record_source_col or rsrc_col
-
-            foreign_hks = binding.foreign_hash_keys or []
-            if len(foreign_hks) < 2:
-                raise ValueError(
-                    f"Source '{src.table_name}' must define at least 2 foreign_hash_keys "
-                    f"for a Link entity, got {len(foreign_hks)}."
-                )
             extra_cols = binding.additional_columns or self.additional_columns
             statics = binding.rsrc_statics or []
 
-            select_expressions = [
+            select_expressions: list[exp.Expression] = [
                 exp.column(src_link_hk).as_(hashkey_col),
-                *[exp.column(fhk) for fhk in foreign_hks],
-                *[exp.column(col) for col in extra_cols],
-                exp.column(src_ldts).as_(ldts_col),
-                exp.column(src_rsrc).as_(rsrc_col),
             ]
+            # Per-source foreign-hash-key columns are aliased positionally to
+            # the canonical link-level names, so multi-source UNIONs line up by
+            # name (not just by position) regardless of physical naming
+            # differences across sources.
+            src_fk_cols = binding.fk_columns or self.foreign_hash_keys
+            for src_col, target_col in zip(src_fk_cols, self.foreign_hash_keys):
+                col_expr = exp.column(src_col)
+                if src_col != target_col:
+                    col_expr = col_expr.as_(target_col)
+                select_expressions.append(col_expr)
+            for col in extra_cols:
+                select_expressions.append(exp.column(col))
+            select_expressions.append(exp.column(src_ldts).as_(ldts_col))
+            select_expressions.append(exp.column(src_rsrc).as_(rsrc_col))
 
             src_query = exp.select(*select_expressions).from_(src_table_exp)
 

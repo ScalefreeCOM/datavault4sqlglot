@@ -23,7 +23,6 @@ SRC_ORDERS = SourceBinding(
         record_source_col="RECORD_SOURCE",
     ),
     hash_key_col="HK_ORDER_CUSTOMER_L",
-    foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
 )
 
 SRC_SAP = SourceBinding(
@@ -35,7 +34,6 @@ SRC_SAP = SourceBinding(
         record_source_col="RECORD_SOURCE",
     ),
     hash_key_col="HK_ORDER_CUSTOMER_L",
-    foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
     rsrc_statics=["SAP/ORDERS"],
 )
 
@@ -48,7 +46,6 @@ SRC_WEB = SourceBinding(
         record_source_col="RECORD_SOURCE",
     ),
     hash_key_col="HK_ORDER_CUSTOMER_L",
-    foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
     rsrc_statics=["WEB/%"],
 )
 
@@ -57,6 +54,7 @@ TARGET = dict(
     target_schema="RAW_VAULT",
     target_table="LNK_ORDER_CUSTOMER",
     link_hash_key="HK_ORDER_CUSTOMER_L",
+    foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
 )
 
 
@@ -116,12 +114,10 @@ def test_link_incremental_multi_source_no_rsrc_static(write_sql):
     src_a = SourceBinding(
         source=SourceModel(table_name="STG_A"),
         hash_key_col="HK_ORDER_CUSTOMER_L",
-        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
     )
     src_b = SourceBinding(
         source=SourceModel(table_name="STG_B"),
         hash_key_col="HK_ORDER_CUSTOMER_L",
-        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
     )
     gen = LinkGenerator(**TARGET, sources=[src_a, src_b], is_incremental=True)
     sql = gen.to_sql()
@@ -159,20 +155,34 @@ def test_link_additional_columns(write_sql):
 
 
 # ---------------------------------------------------------------------------
-# 8. Validation — fewer than 2 foreign_hash_keys raises ValueError
+# 8. Validation — fewer than 2 foreign_hash_keys raises ValueError at __init__
 # ---------------------------------------------------------------------------
 def test_link_fk_validation_raises():
+    src = SourceBinding(source=SourceModel(table_name="stg_orders"))
+    with pytest.raises(ValueError, match="at least 2 foreign_hash_keys"):
+        LinkGenerator(
+            target_table="lnk_orders",
+            sources=[src],
+            link_hash_key="hk_lnk_orders",
+            foreign_hash_keys=["hk_customer"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# 8b. Validation — fk_columns length must match foreign_hash_keys length
+# ---------------------------------------------------------------------------
+def test_link_fk_columns_length_mismatch_raises():
     src = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
-        foreign_hash_keys=["hk_customer"],
+        fk_columns=["HK_ORDER_H"],  # only 1 — link expects 2
     )
-    gen = LinkGenerator(
-        target_table="lnk_orders",
-        sources=[src],
-        link_hash_key="hk_lnk_orders",
-    )
-    with pytest.raises(ValueError, match="at least 2 foreign_hash_keys"):
-        gen.generate_sql()
+    with pytest.raises(ValueError, match="fk_columns has length 1"):
+        LinkGenerator(
+            target_table="lnk_orders",
+            sources=[src],
+            link_hash_key="hk_lnk_orders",
+            foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +202,6 @@ def test_link_incremental_single_source_multiple_rsrc_statics(write_sql):
             load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
         ),
         hash_key_col="HK_ORDER_CUSTOMER_L",
-        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
         rsrc_statics=["SAP/ORDERS", "SAP/ARCHIVE", "SAP/EXT"],
     )
     gen = LinkGenerator(**TARGET, sources=[src], is_incremental=True)
@@ -230,7 +239,6 @@ def test_link_incremental_multi_source_multi_rsrc_statics(write_sql):
             load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
         ),
         hash_key_col="HK_ORDER_CUSTOMER_L",
-        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
         rsrc_statics=["SAP/ORDERS", "SAP/ARCHIVE"],
     )
     web = SourceBinding(
@@ -239,7 +247,6 @@ def test_link_incremental_multi_source_multi_rsrc_statics(write_sql):
             load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
         ),
         hash_key_col="HK_ORDER_CUSTOMER_L",
-        foreign_hash_keys=["HK_ORDER_H", "HK_CUSTOMER_H"],
         rsrc_statics=["WEB/EU/%", "WEB/US/%"],
     )
     gen = LinkGenerator(**TARGET, sources=[sap, web], is_incremental=True)
