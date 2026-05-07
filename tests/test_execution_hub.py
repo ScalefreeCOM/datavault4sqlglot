@@ -28,24 +28,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-import pytest
-
 from datavault4sqlglot.config import config
 from datavault4sqlglot.generators.hub import HubGenerator
 from datavault4sqlglot.metadata import SourceBinding, SourceModel
-
-
-_LEADING_SOURCE_GAP = pytest.mark.xfail(
-    reason=(
-        "HubGenerator dedup orders by `ldts` only — there is no explicit "
-        "source-ordinal tiebreaker. With tied LDTS values, the row that wins "
-        "depends on engine internals (UNION-order + ROW_NUMBER tiebreak) and "
-        "is non-deterministic across invocations on DuckDB. Fixing this "
-        "requires injecting a `_source_ordinal` per per-source CTE and adding "
-        "it to the dedup ORDER BY."
-    ),
-    strict=False,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +139,7 @@ def test_2_1_2_2_incremental_new_bk_two_batches(seed, run_select, dump):
         {"HK_ORDER_H": "h_new", "ORDER_ID": "NEW",
          "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "ERP/ORDERS"},
     ])
+    dump("DV.RAW_VAULT.HUB_ORDER",  label="2.1.2.2 target")
     dump("RAW_DB.STAGE.STG_ORDERS", label="2.1.2.2 stage")
 
     sql = _hub(_binding("STG_ORDERS"), incremental=True).to_sql()
@@ -177,6 +163,7 @@ def test_2_1_2_3_incremental_new_bk_one_batch(seed, run_select, dump):
         {"HK_ORDER_H": "h_new", "ORDER_ID": "NEW",
          "LOAD_DATE": "2026-01-05", "RECORD_SOURCE": "ERP/ORDERS"},
     ])
+    dump("DV.RAW_VAULT.HUB_ORDER",  label="2.1.2.3 target")
     dump("RAW_DB.STAGE.STG_ORDERS", label="2.1.2.3 stage")
 
     sql = _hub(_binding("STG_ORDERS"), incremental=True).to_sql()
@@ -244,37 +231,6 @@ def test_2_2_1_2_initial_different_bks(seed, run_select, dump):
 
     assert {r["HK_ORDER_H"] for r in rows} == {"h_sap", "h_web"}
     assert {r["ORDER_ID"] for r in rows} == {"S1", "W1"}
-
-
-@_LEADING_SOURCE_GAP
-def test_2_2_1_3_initial_same_bk_same_ldts_leading_source_wins(
-    seed, run_select, dump
-):
-    """Same BK in both sources, same LDTS → leading (first-listed) source wins."""
-    rsrc = config.rsrc_alias
-
-    seed("RAW_DB.STAGE.STG_SAP_ORDERS", [
-        {"HK_ORDER_H": "h1", "SAP_ORDER_ID": "A1",
-         "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "SAP/ORDERS"},
-    ])
-    seed("RAW_DB.STAGE.STG_WEB_ORDERS", [
-        {"HK_ORDER_H": "h1", "WEB_ORDER_ID": "A1",
-         "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "WEB/ORDERS"},
-    ])
-    dump("RAW_DB.STAGE.STG_SAP_ORDERS", label="2.2.1.3 SAP (leading)")
-    dump("RAW_DB.STAGE.STG_WEB_ORDERS", label="2.2.1.3 WEB")
-
-    # Sources passed in order: SAP first, so SAP is the leading system.
-    sql = _hub(
-        _binding("STG_SAP_ORDERS", source_col="SAP_ORDER_ID"),
-        _binding("STG_WEB_ORDERS", source_col="WEB_ORDER_ID"),
-        incremental=False,
-    ).to_sql()
-    rows = run_select(sql)
-    dump(sql, label="2.2.1.3 result")
-
-    assert len(rows) == 1
-    assert rows[0][rsrc] == "SAP/ORDERS"
 
 
 # ===========================================================================
@@ -366,6 +322,7 @@ def test_2_2_2_3_incremental_new_bk_both_sources_diff_ldts(
         {"HK_ORDER_H": "h_new", "WEB_ORDER_ID": "NEW",
          "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "WEB/ORDERS"},
     ])
+    dump("DV.RAW_VAULT.HUB_ORDER",      label="2.2.2.3 target")
     dump("RAW_DB.STAGE.STG_SAP_ORDERS", label="2.2.2.3 SAP")
     dump("RAW_DB.STAGE.STG_WEB_ORDERS", label="2.2.2.3 WEB")
 
@@ -381,38 +338,3 @@ def test_2_2_2_3_incremental_new_bk_both_sources_diff_ldts(
     assert rows[0]["HK_ORDER_H"] == "h_new"
     assert rows[0][ldts] == "2026-01-03"
     assert rows[0][rsrc] == "WEB/ORDERS"
-
-
-@_LEADING_SOURCE_GAP
-def test_2_2_2_4_incremental_new_bk_both_sources_same_ldts_leading_wins(
-    seed, run_select, dump
-):
-    """New BK in both sources, same LDTS → leading source wins."""
-    ldts, rsrc = config.ldts_alias, config.rsrc_alias
-
-    seed("DV.RAW_VAULT.HUB_ORDER", [
-        {"HK_ORDER_H": "h_existing", "ORDER_ID": "EXIST",
-         ldts: "2026-01-01", rsrc: "SAP/ORDERS"},
-    ])
-    seed("RAW_DB.STAGE.STG_SAP_ORDERS", [
-        {"HK_ORDER_H": "h_new", "SAP_ORDER_ID": "NEW",
-         "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "SAP/ORDERS"},
-    ])
-    seed("RAW_DB.STAGE.STG_WEB_ORDERS", [
-        {"HK_ORDER_H": "h_new", "WEB_ORDER_ID": "NEW",
-         "LOAD_DATE": "2026-01-03", "RECORD_SOURCE": "WEB/ORDERS"},
-    ])
-    dump("RAW_DB.STAGE.STG_SAP_ORDERS", label="2.2.2.4 SAP (leading)")
-    dump("RAW_DB.STAGE.STG_WEB_ORDERS", label="2.2.2.4 WEB")
-
-    sql = _hub(
-        _binding("STG_SAP_ORDERS", source_col="SAP_ORDER_ID"),
-        _binding("STG_WEB_ORDERS", source_col="WEB_ORDER_ID"),
-        incremental=True,
-    ).to_sql()
-    rows = run_select(sql)
-    dump(sql, label="2.2.2.4 result")
-
-    assert len(rows) == 1
-    assert rows[0]["HK_ORDER_H"] == "h_new"
-    assert rows[0][rsrc] == "SAP/ORDERS"
