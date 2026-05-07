@@ -68,10 +68,11 @@ class BaseGenerator(ABC):
         """
         Converts table, schema, and database strings into a sqlglot.exp.Table.
         """
+        quoted = config.quote_identifiers
         return exp.Table(
-            this=exp.Identifier(this=table, quoted=True),
-            db=exp.Identifier(this=schema, quoted=True) if schema else None,
-            catalog=exp.Identifier(this=database, quoted=True) if database else None
+            this=exp.Identifier(this=table, quoted=quoted),
+            db=exp.Identifier(this=schema, quoted=quoted) if schema else None,
+            catalog=exp.Identifier(this=database, quoted=quoted) if database else None
         )
 
     @abstractmethod
@@ -183,29 +184,38 @@ class BaseGenerator(ABC):
     def _get_type(self, data_type: DataType.Type, length: int = None):
         return DataType.build(data_type, expressions=[exp.Literal.number(length)] if length else None)
 
+    @staticmethod
+    def _chr(code: int) -> exp.Expression:
+        return exp.Chr(expressions=[exp.Literal.number(code)])
+
     def _clean_column(self, col_name: str, use_rtrim: bool = True):
         """Standard Data Vault column cleaning for hashing."""
-        varchar_type = self._get_type(DataType.Type.VARCHAR, 4000)
-        
+        varchar_type = self._get_type(DataType.Type.VARCHAR)
+
         # 1. Cast
-        # Use explicit Column with Identifier to ensure quoting
-        col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=True))
+        col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=config.quote_identifiers))
         c = exp.Cast(this=col_expr, to=varchar_type)
-        
+
         # 2. Trim (if enabled)
         if use_rtrim:
             c = exp.Trim(this=c)
-        
-        # 3. Escape delimiters and quotes
-        c = exp.Replace(this=c, expression=exp.Literal.string(r"\\"), replacement=exp.Literal.string(r"\\\\"))
-        c = exp.Replace(this=c, expression=exp.Literal.string(r'"'), replacement=exp.Literal.string(r'\"'))
+
+        # 3. Escape delimiters and quotes.
+        # CHR(92) = backslash; used for the \ → \\ escape.
+        # The doublequote wrapper uses CHR(34) only (no leading backslash) because
+        # Snowflake's ESCAPE_STRING mode interprets '\"' as just '"', matching dbt output.
+        bs = self._chr(92)
+        bs_bs = exp.Concat(expressions=[self._chr(92), self._chr(92)])
+
+        c = exp.Replace(this=c, expression=bs, replacement=bs_bs)
+        c = exp.Replace(this=c, expression=exp.Literal.string('"'), replacement=self._chr(34))
         c = exp.Replace(this=c, expression=exp.Literal.string("^^"), replacement=exp.Literal.string("--"))
-        
-        # 4. Quoting: CONCAT('\"', c, '\"')
-        quote = exp.Literal.string(r'\"')
-        quoted_col = exp.Concat(expressions=[quote, c, quote])
-        
-        # 5. Return '^^' null-string placeholder when column is NULL
+
+        # 4. Wrap: CONCAT('"', c, '"')  =  "value"
+        dq = exp.Literal.string('"')
+        quoted_col = exp.Concat(expressions=[dq, c, exp.Literal.string('"')])
+
+        # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
 
     def _build_hash_expression(
@@ -229,8 +239,8 @@ class BaseGenerator(ABC):
         if use_rtrim is None:
             use_rtrim = config.use_trim
 
-        varchar_type = self._get_type(DataType.Type.VARCHAR, 4000)
-        
+        varchar_type = self._get_type(DataType.Type.VARCHAR)
+
         processed_cols = [self._clean_column(c, use_rtrim=use_rtrim) for c in columns]
         num_cols = len(columns)
 
@@ -245,10 +255,7 @@ class BaseGenerator(ABC):
             )
             null_check_string = "||".join(["^^"] * num_cols)
         
-        # UPPER (if not case sensitive)
-        # Note: If case_sensitivity is False, it means we WANT to normalize to UPPER (standard DV behavior)
-        # If case_sensitivity is True, we keep it as is.
-        # UPPER (if not case sensitive)
+        # case_sensitivity=False → apply UPPER (standard DV behavior); True → preserve case
         if not case_sensitivity:
             concat_block = exp.Upper(this=concat_block)
             
@@ -279,7 +286,7 @@ class BaseGenerator(ABC):
             
         hash_expr = exp.Lower(this=hash_expr)
         
-        # NULLIF(MD5(...), '0000...') -> Binary Hash Default
+        # COALESCE(MD5(...), '0000...') — null BK input produces the all-zeros sentinel
         # Hex length: MD5=32, SHA256=64
         hex_len = 64 if "SHA2" in hash_alg or "SHA256" in hash_alg else 32
-        return exp.Nullif(this=hash_expr, expression=exp.Literal.string('0' * hex_len))
+        return exp.Coalesce(this=hash_expr, expressions=[exp.Literal.string('0' * hex_len)])
