@@ -114,8 +114,8 @@ def test_src_new_filter_uses_strict_gt_not_gte():
 
 def test_src_new_filter_coalesces_with_beginning_of_all_times():
     """Cold-start safety: COALESCE must wrap MAX with beginning_of_all_times."""
-    boa = "1900-01-01"
-    config.beginning_of_all_times = boa
+    beginning_of_all_times = "1900-01-01"
+    config.beginning_of_all_times = beginning_of_all_times
     gen = HubGenerator(
         target_table="HUB_ORDER",
         sources=[_binding("STG_SAP", statics=["SAP/ORDERS"])],
@@ -133,7 +133,7 @@ def test_src_new_filter_coalesces_with_beginning_of_all_times():
     literals = [
         lit.this for c in coalesces for lit in c.find_all(exp.Literal) if lit.is_string
     ]
-    assert boa in literals, f"COALESCE must fall back to {boa!r}, got literals={literals}"
+    assert beginning_of_all_times in literals, f"COALESCE must fall back to {beginning_of_all_times!r}, got literals={literals}"
 
 
 def test_src_new_filter_branch_count_matches_statics():

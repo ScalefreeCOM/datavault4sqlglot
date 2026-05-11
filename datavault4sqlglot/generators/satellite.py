@@ -55,8 +55,8 @@ class SatelliteGenerator(BaseGenerator):
         _, hash_diff_col = self._resolve_column_config(self.hash_diff)
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
-        boa = config.beginning_of_all_times
-        eoa = config.end_of_all_times
+        beginning_of_all_times = config.beginning_of_all_times
+        end_of_all_times = config.end_of_all_times
 
         target_exp = self._get_table_expression(
             self.target_table, self.target_schema, self.target_database
@@ -90,12 +90,12 @@ class SatelliteGenerator(BaseGenerator):
                 exp.select(
                     exp.Coalesce(
                         this=exp.Max(this=exp.column(ldts_col)),
-                        expressions=[exp.Literal.string(boa)],
+                        expressions=[exp.Literal.string(beginning_of_all_times)],
                     )
                 )
                 .from_(target_exp)
                 .where(
-                    exp.column(ldts_col).neq(exp.Literal.string(eoa))
+                    exp.column(ldts_col).neq(exp.Literal.string(end_of_all_times))
                 )
             )
             src_query = src_query.where(

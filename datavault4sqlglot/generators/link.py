@@ -59,8 +59,8 @@ class LinkGenerator(BaseGenerator):
         hashkey_col = self.link_hash_key
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
-        boa = config.beginning_of_all_times
-        eoa = config.end_of_all_times
+        beginning_of_all_times = config.beginning_of_all_times
+        end_of_all_times = config.end_of_all_times
 
         # Helper for target table
         target_exp = self._get_table_expression(self.target_table, self.target_schema, self.target_database)
@@ -73,7 +73,7 @@ class LinkGenerator(BaseGenerator):
 
         if self.is_incremental and not self.disable_hwm:
             hwm_query = self._build_rsrc_static_hwm_query(
-                self.sources, target_exp, ldts_col, rsrc_col, eoa
+                self.sources, target_exp, ldts_col, rsrc_col, end_of_all_times
             )
             if hwm_query is not None:
                 ctes[hwm_cte_name] = hwm_query
@@ -118,7 +118,7 @@ class LinkGenerator(BaseGenerator):
                 if statics and hwm_cte_name in ctes:
                     src_query = src_query.where(
                         self._build_rsrc_static_or_filter(
-                            statics, src_ldts, src_rsrc, hwm_cte_name, boa
+                            statics, src_ldts, src_rsrc, hwm_cte_name, beginning_of_all_times
                         )
                     )
                 elif not statics and len(self.sources) == 1:
@@ -126,11 +126,11 @@ class LinkGenerator(BaseGenerator):
                         exp.select(
                             exp.Coalesce(
                                 this=exp.Max(this=exp.column(ldts_col)),
-                                expressions=[exp.Literal.string(boa)],
+                                expressions=[exp.Literal.string(beginning_of_all_times)],
                             )
                         )
                         .from_(target_exp)
-                        .where(exp.column(ldts_col).neq(exp.Literal.string(eoa)))
+                        .where(exp.column(ldts_col).neq(exp.Literal.string(end_of_all_times)))
                     )
                     src_query = src_query.where(exp.column(src_ldts) > exp.Paren(this=subquery))
 

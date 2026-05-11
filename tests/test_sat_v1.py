@@ -95,7 +95,7 @@ def test_sat_v1_lead_window_structure(write_sql):
 # ---------------------------------------------------------------------------
 # 5. COALESCE wraps LEAD with end_of_all_times
 # ---------------------------------------------------------------------------
-def test_sat_v1_coalesce_lead_with_eoa(write_sql):
+def test_sat_v1_coalesce_lead_with_end_of_all_times(write_sql):
     config.end_of_all_times = "9999-12-31"
     sql = _gen().to_sql()
     write_sql("COALESCE wraps LEAD result with end_of_all_times=9999-12-31", sql)

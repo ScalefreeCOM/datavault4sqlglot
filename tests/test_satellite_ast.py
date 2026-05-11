@@ -80,8 +80,8 @@ def test_hwm_filter_uses_strict_gt_not_gte():
 
 def test_hwm_filter_coalesces_with_beginning_of_all_times():
     """Cold-start safety: COALESCE must wrap MAX with beginning_of_all_times."""
-    boa = "1900-01-01"
-    config.beginning_of_all_times = boa
+    beginning_of_all_times = "1900-01-01"
+    config.beginning_of_all_times = beginning_of_all_times
 
     tree = _parse(_sat(is_incremental=True).to_sql())
     src_cte = _find_cte(tree, "src_new")
@@ -92,29 +92,29 @@ def test_hwm_filter_coalesces_with_beginning_of_all_times():
     literals = [
         lit.this for c in coalesces for lit in c.find_all(exp.Literal) if lit.is_string
     ]
-    assert boa in literals, f"COALESCE must fall back to {boa!r}, got literals={literals}"
+    assert beginning_of_all_times in literals, f"COALESCE must fall back to {beginning_of_all_times!r}, got literals={literals}"
 
 
 def test_hwm_subquery_excludes_end_of_all_times_rows():
     """The HWM subquery's own WHERE must skip rows where ldts = end_of_all_times."""
-    eoa = "9999-12-31"
-    config.end_of_all_times = eoa
+    end_of_all_times = "9999-12-31"
+    config.end_of_all_times = end_of_all_times
 
     tree = _parse(_sat(is_incremental=True).to_sql())
     src_cte = _find_cte(tree, "src_new")
     assert src_cte is not None
 
     # The HWM subquery is the inner Select inside src_new's WHERE — its own
-    # WHERE clause must compare ldts to the EOA literal.
+    # WHERE clause must compare ldts to the end_of_all_times literal.
     inner_selects = list(src_cte.find_all(exp.Select))
-    eoa_literals = []
+    end_of_all_times_literals = []
     for sel in inner_selects:
         if sel is src_cte.this:  # skip the outer src_new SELECT itself
             continue
         for lit in sel.find_all(exp.Literal):
-            if lit.is_string and lit.this == eoa:
-                eoa_literals.append(lit)
-    assert eoa_literals, f"HWM subquery must filter out ldts = {eoa!r}"
+            if lit.is_string and lit.this == end_of_all_times:
+                end_of_all_times_literals.append(lit)
+    assert end_of_all_times_literals, f"HWM subquery must filter out ldts = {end_of_all_times!r}"
 
 
 # ---------------------------------------------------------------------------

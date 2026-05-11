@@ -62,7 +62,7 @@ class SatelliteV1Generator(BaseGenerator):
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
         ledts_col = self.ledts_alias
-        eoa = config.end_of_all_times
+        end_of_all_times = config.end_of_all_times
 
         src_exp = self._get_table_expression(
             self.sat_v0_table, self.sat_v0_schema, self.sat_v0_database
@@ -81,7 +81,7 @@ class SatelliteV1Generator(BaseGenerator):
         )
         ledts_expr = exp.Coalesce(
             this=lead_window,
-            expressions=[exp.Literal.string(eoa)],
+            expressions=[exp.Literal.string(end_of_all_times)],
         ).as_(exp.Identifier(this=ledts_col, quoted=True))
 
         base_cols = [
@@ -99,7 +99,7 @@ class SatelliteV1Generator(BaseGenerator):
             is_current_expr = (
                 exp.Case()
                 .when(
-                    exp.column(ledts_col).eq(exp.Literal.string(eoa)),
+                    exp.column(ledts_col).eq(exp.Literal.string(end_of_all_times)),
                     exp.true(),
                 )
                 .else_(exp.false())
