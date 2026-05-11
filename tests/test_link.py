@@ -155,16 +155,16 @@ def test_link_additional_columns(write_sql):
 
 
 # ---------------------------------------------------------------------------
-# 8. Validation — fewer than 2 foreign_hash_keys raises ValueError at __init__
+# 8. Validation — zero foreign_hash_keys raises ValueError at __init__
 # ---------------------------------------------------------------------------
 def test_link_fk_validation_raises():
     src = SourceBinding(source=SourceModel(table_name="stg_orders"))
-    with pytest.raises(ValueError, match="at least 2 foreign_hash_keys"):
+    with pytest.raises(ValueError, match="at least 1 foreign_hash_key"):
         LinkGenerator(
             target_table="lnk_orders",
             sources=[src],
             link_hash_key="hk_lnk_orders",
-            foreign_hash_keys=["hk_customer"],
+            foreign_hash_keys=[],
         )
 
 

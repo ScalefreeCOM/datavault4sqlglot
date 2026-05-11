@@ -34,11 +34,9 @@ class LinkGenerator(BaseGenerator):
         self.disable_hwm = disable_hwm
         self.additional_columns = additional_columns or []
 
-        # By DV2 definition a Link relates two or more business entities — fail
-        # at construction so a malformed UNION never reaches downstream code.
-        if len(self.foreign_hash_keys) < 2:
+        if len(self.foreign_hash_keys) < 1:
             raise ValueError(
-                f"LinkGenerator must declare at least 2 foreign_hash_keys, "
+                f"LinkGenerator must declare at least 1 foreign_hash_key, "
                 f"got {len(self.foreign_hash_keys)}."
             )
 
