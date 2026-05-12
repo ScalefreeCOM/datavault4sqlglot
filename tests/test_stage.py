@@ -288,3 +288,107 @@ def test_stage_all_features_combined(write_sql):
     assert "HD_ORDER_DETAILS" in sql
     assert "LEGACY_REGION" in sql
     assert "SEQ_NUM" in sql
+
+
+# ---------------------------------------------------------------------------
+# 19. Ghost record — basic: unknown_values + error_values + ghost_records CTEs
+# ---------------------------------------------------------------------------
+def test_stage_ghost_record_basic(write_sql):
+    src = StageModel(
+        table_name="STG_CUSTOMERS",
+        schema="STAGE",
+        load_date_col="ldts",
+        record_source_col="rsrc",
+        ghost_record_types={
+            "ldts":        "TIMESTAMP",
+            "rsrc":        "VARCHAR",
+            "customer_id": "VARCHAR",
+        },
+        hashed_columns={"hk_h_customer": ["customer_id"]},
+    )
+    sql = StageGenerator(source_model=src).to_sql()
+    write_sql("Ghost Record — unknown_values + error_values + ghost_records CTEs", sql)
+    assert "unknown_values" in sql
+    assert "error_values" in sql
+    assert "ghost_records" in sql
+    assert "UNION ALL" in sql.upper()
+    # Hash column appears in main SELECT (computed) and ghost CTEs (sentinel literal)
+    assert "hk_h_customer" in sql
+    # Sentinel values for hash columns
+    assert "00000000000000000000000000000000" in sql   # unknown key
+    assert "ffffffffffffffffffffffffffffffff" in sql   # error key
+    # ldts ghost values
+    assert config.beginning_of_all_times in sql
+    assert config.end_of_all_times in sql
+    # rsrc ghost values
+    assert config.ghost_record_rsrc in sql
+    assert config.ghost_record_error_rsrc in sql
+    # Type-aware string values
+    assert "(unknown)" in sql
+    assert "(error)" in sql
+
+
+# ---------------------------------------------------------------------------
+# 20. Ghost record — incremental (HWM in main SELECT, ghost CTEs are unfiltered)
+# ---------------------------------------------------------------------------
+def test_stage_ghost_record_incremental(write_sql):
+    src = StageModel(
+        table_name="STG_CUSTOMERS",
+        schema="STAGE",
+        load_date_col="ldts",
+        record_source_col="rsrc",
+        ghost_record_types={
+            "ldts":        "TIMESTAMP",
+            "rsrc":        "VARCHAR",
+            "customer_id": "VARCHAR",
+        },
+        hashed_columns={"hk_h_customer": ["customer_id"]},
+    )
+    sql = StageGenerator(source_model=src, is_incremental=True).to_sql()
+    write_sql("Ghost Record — incremental (HWM in main SELECT, ghost CTEs unfiltered)", sql)
+    assert "unknown_values" in sql
+    assert "error_values" in sql
+    assert "ghost_records" in sql
+    assert "UNION ALL" in sql.upper()
+    assert "MAX" in sql
+
+
+# ---------------------------------------------------------------------------
+# 21. Ghost record + derived columns — derived CTE before ghost CTEs
+# ---------------------------------------------------------------------------
+def test_stage_ghost_record_with_derived(write_sql):
+    src = StageModel(
+        table_name="STG_CUSTOMERS",
+        schema="STAGE",
+        ghost_record_types={
+            "ldts":        "TIMESTAMP",
+            "rsrc":        "VARCHAR",
+            "customer_id": "VARCHAR",
+        },
+        hashed_columns={"hk_h_customer": ["customer_id"]},
+        derived_columns={"RECORD_SOURCE": "'ERP/CUSTOMERS'"},
+    )
+    sql = StageGenerator(source_model=src).to_sql()
+    write_sql("Ghost Record + derived_columns — derived CTE then ghost CTEs", sql)
+    assert "derived_columns_cte" in sql
+    assert "unknown_values" in sql
+    assert "error_values" in sql
+    assert "ghost_records" in sql
+    assert "UNION ALL" in sql.upper()
+    assert "RECORD_SOURCE" in sql
+
+
+# ---------------------------------------------------------------------------
+# 22. No ghost record — ghost_record_types=None keeps original behaviour
+# ---------------------------------------------------------------------------
+def test_stage_no_ghost_record_by_default(write_sql):
+    src = StageModel(
+        table_name="STG_CUSTOMERS",
+        hashed_columns={"hk_h_customer": ["customer_id"]},
+    )
+    sql = StageGenerator(source_model=src).to_sql()
+    write_sql("No Ghost Record — ghost_record_types=None keeps original path", sql)
+    assert "UNION" not in sql.upper()
+    assert "unknown_values" not in sql
+    assert "error_values" not in sql
+    assert "ghost_records" not in sql

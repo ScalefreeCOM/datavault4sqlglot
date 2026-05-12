@@ -19,6 +19,8 @@ class DataVaultConfig(BaseModel):
     use_trim: bool = Field(default=True, description="Default trim behavior for hashing.")
     dialect: str = Field(default="snowflake", description="Target SQL dialect for generation.")
     quote_identifiers: bool = Field(default=True, description="Whether to quote table, schema, database, and column identifiers.")
+    ghost_record_rsrc: str = Field(default="SYSTEM", description="record_source value for the 'unknown' ghost record row.")
+    ghost_record_error_rsrc: str = Field(default="ERROR", description="record_source value for the 'error' ghost record row.")
 
     def update_from_dict(self, data: dict):
         """Update configuration attributes from a dictionary."""
