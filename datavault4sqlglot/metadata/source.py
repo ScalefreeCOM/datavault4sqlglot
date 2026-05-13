@@ -60,6 +60,12 @@ class StageModel(BaseModel):
     # NULL placeholder columns for schema evolution: col_name → SQL datatype
     missing_columns: Optional[Dict[str, str]] = Field(default=None)
 
+    # Ghost record: source column name → SQL type string.
+    # When set, a ghost/zero record row is unioned into the stage output.
+    # All source columns (ldts, rsrc, business keys, payload) must be listed;
+    # hash columns are excluded — they are computed from the ghost values.
+    ghost_record_types: Optional[Dict[str, str]] = Field(default=None)
+
     # Column name for a ROW_NUMBER() OVER () sequence expression
     sequence: Optional[str] = Field(default=None)
 
