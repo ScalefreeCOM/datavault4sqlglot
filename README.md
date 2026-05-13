@@ -1,9 +1,61 @@
 # datavault4sqlglot
 
+A Python library for generating Data Vault 2.0 SQL using [sqlglot](https://github.com/tobymao/sqlglot).
+Produces dialect-agnostic SQL for Hubs, Links, Satellites, and Staging layers — no dbt, no live database connection required.
+
+## Quick Start
+
+```python
+from datavault4sqlglot.generators.hub import HubGenerator
+from datavault4sqlglot.metadata import SourceModel, SourceBinding
+
+# Describe the staged source table
+source = SourceModel(
+    schema="stage",
+    table_name="stg_orders",
+    load_date_col="ldts",
+    record_source_col="rsrc",
+)
+
+# Bind the source to a Hub: declare which column is the business key
+binding = SourceBinding(
+    source=source,
+    business_keys=["order_id"],
+)
+
+# Generate the Hub SQL
+generator = HubGenerator(
+    sources=[binding],
+    hashkey="hk_order_h",
+    target_schema="dv",
+    target_table="order_h",
+    is_incremental=True,
+)
+
+print(generator.to_sql())
+```
+
 ## Configuration
 
-The library uses a global configuration object (`datavault4sqlglot.config`) with sane defaults. 
-You can override these defaults by placing a `config.json` file in your current working directory. 
+The library uses a global configuration object (`datavault4sqlglot.config`) with the following defaults:
+
+| Key | Default | Description |
+|---|---|---|
+| `dialect` | `snowflake` | Target SQL dialect |
+| `hash` | `MD5` | Hash algorithm (`MD5`, `SHA256`, `SHA1`) |
+| `ldts_alias` | `ldts` | Load date timestamp column name |
+| `rsrc_alias` | `rsrc` | Record source column name |
+| `ledts_alias` | `ledts` | Load end date column name |
+| `end_of_all_times` | `9999-12-31` | Sentinel for open-ended records |
+| `beginning_of_all_times` | `0001-01-01` | Sentinel for ghost records |
+| `hashkey_input_case_sensitive` | `false` | Apply `UPPER()` before hashing hash keys |
+| `hashdiff_input_case_sensitive` | `false` | Apply `UPPER()` before hashing hash diffs |
+| `use_trim` | `true` | Apply `TRIM()` before hashing |
+| `quote_identifiers` | `true` | Quote table and column identifiers |
+| `ghost_record_rsrc` | `SYSTEM` | Record source value for the unknown ghost row |
+| `ghost_record_error_rsrc` | `ERROR` | Record source value for the error ghost row |
+
+You can override any of these by placing a `config.json` file in your current working directory.
 The library will automatically load and apply these settings when imported.
 
 **Example `config.json`:**
@@ -21,52 +73,53 @@ from datavault4sqlglot.config import config, load_config
 load_config(config, "/path/to/my/custom_config.json")
 ```
 
-
-
+## Models
 
 Three distinct classes, each for a different layer:
 
----
-StageModel — used exclusively by StageGenerator
+### `StageModel` — used exclusively by `StageGenerator`
 
 Describes a raw source table that needs to be hashed and prepared. It owns everything about that transformation: which columns to hash, derived expressions, missing columns for schema evolution, etc. It's a self-contained description of one staging job — no binding to anything else.
 
+```python
 StageModel(
     table_name="raw.orders",
     hashed_columns={"HK_ORDER_H": ["ORDER_ID"]},
     derived_columns={"ldts": "CURRENT_TIMESTAMP()"},
 )
+```
 
----
-SourceModel — the physical table pointer used by vault generators (Hub, Link, Sat)
+### `SourceModel` — the physical table pointer used by vault generators (Hub, Link, Sat)
 
 Just says where to find the already-staged data: table name, optional schema/database, and which columns are ldts/rsrc if they differ from the config defaults. No transformation logic.
 
+```python
 SourceModel(
     database="RAW_DB", schema="STAGE", table_name="STG_ORDERS",
     load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
 )
+```
 
----
-SourceBinding — wraps a SourceModel with DV-loading intent
+### `SourceBinding` — wraps a `SourceModel` with DV-loading intent
 
-Answers what to extract from that staged table for a specific vault entity: which columns are business keys, which are foreign hash keys (for links), what the rsrc_statics are for HWM scoping, etc. A single SourceModel can be wrapped in different SourceBindings for different vault entities.
+Answers what to extract from that staged table for a specific vault entity: which columns are business keys, which are foreign hash keys (for links), what the rsrc_statics are for HWM scoping, etc. A single `SourceModel` can be wrapped in different `SourceBinding`s for different vault entities.
 
+```python
 SourceBinding(
     source=_SRC_ORDERS_MODEL,   # ← the SourceModel
     business_keys=["ORDER_ID"],
     rsrc_statics=["ERP/ORDERS"],
 )
+```
 
----
-The conceptual split:
+## Conceptual split
 
-Raw DB table
-    └── StageModel  →  StageGenerator  →  staged table (with hash keys)
+→ Staging table  
+&emsp;→ `StageModel` → `StageGenerator` → staged table (to calculate hash keys)
 
-Staged table
-    └── SourceModel (where is it?)
-          └── SourceBinding (what do I want from it, for which vault entity?)
-                └── HubGenerator / LinkGenerator / SatelliteGenerator
+→ Raw Data Vault table  
+&emsp;→ `SourceModel` — where is the data?  
+&emsp;&emsp;→ `SourceBinding` — what to extract, for which vault entity?  
+&emsp;&emsp;&emsp;→ `HubGenerator` / `LinkGenerator` / `SatelliteGenerator`
 
-StageModel and SourceModel are both Pydantic models (validated on construction). SourceBinding is a plain dataclass — it's just a lightweight container pairing a SourceModel with extraction metadata, so Pydantic validation would be overkill there.
+`StageModel` and `SourceModel` are both Pydantic models (validated on construction). `SourceBinding` is a plain dataclass — it's just a lightweight container pairing a `SourceModel` with extraction metadata.

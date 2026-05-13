@@ -200,7 +200,39 @@ def generate_dbt_project(project: Project, output: OutputConfig) -> Path:
 
 ---
 
-## 3. Self-Review Checklist
+## 3. Data Vault Naming Conventions
+
+These conventions apply to all generated entity names and column names in both `datavault4sqlglot` and `datavault4spark`.
+
+### Entity (Table) Names
+
+| Entity Type              | Pattern                                    | Example                  |
+|--------------------------|--------------------------------------------|--------------------------|
+| Hub                      | `<business_object>_h`                      | `customer_h`             |
+| Link                     | `<business_object1>_<business_object2>_l`  | `order_customer_l`       |
+| Satellite v0 (current)   | `<business_object>_[n\|p]0_s`              | `customer_0_s`           |
+| Satellite v1 (end-dated) | `<business_object>_[n\|p]1_s`              | `customer_1_s`           |
+| NH Satellite             | `<business_object>_[n\|p][0\|1]_ns`        | `customer_ns`            |
+| NH Link                  | `<business_object1>_<business_object2>_nl` | `order_customer_nl`      |
+| Effectivity Satellite    | `<business_object1>_<business_object2>_[0\|1]_es` | `order_customer_0_es` |
+| Multi-Active Satellite   | `<business_object>_[n\|p][0\|1]_ms`        | `customer_0_ms`          |
+| Reference Hub            | `<business_object>_rh`                     | `order_status_rh`        |
+| Reference Satellite      | `<business_object>_rs`                     | `order_status_rs`        |
+
+### Column Names (Hash Keys and Hash Diffs)
+
+| Column Type    | Pattern                                          | Example                     |
+|----------------|--------------------------------------------------|-----------------------------|
+| Hub hash key   | `hk_h_<business_object>`                        | `hk_h_customer`             |
+| Link hash key  | `hk_l_<business_object1>_<business_object2>`    | `hk_l_order_customer`       |
+| Hash diff      | `hd_<business_object>_[n\|p]_s`                 | `hd_customer_s`             |
+
+> `[n|p]` = optional namespace/partition prefix; `[0|1]` = version (0 = raw/current, 1 = end-dated).
+> Hash diff names do **not** include the version number — `hd_customer_s` serves all versions.
+
+---
+
+## 4. Self-Review Checklist
 
 When writing or refactoring code, verify:
 
