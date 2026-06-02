@@ -188,13 +188,24 @@ class BaseGenerator(ABC):
     def _chr(code: int) -> exp.Expression:
         return exp.Chr(expressions=[exp.Literal.number(code)])
 
+    @staticmethod
+    def _dialect_varchar(dialect: str) -> exp.DataType:
+        """Returns the appropriate VARCHAR type for hashing for the given dialect."""
+        if dialect == "oracle":
+            return exp.DataType.build("VARCHAR2(2000)")
+        elif dialect in ("tsql", "fabric"):
+            return exp.DataType.build("VARCHAR(4000)")
+        elif dialect == "exasol":
+            return exp.DataType.build("VARCHAR(20000)")
+        return exp.DataType(this=exp.DataType.Type.VARCHAR)
+
     def _clean_column(self, col_name: str, use_rtrim: bool = True):
         """Standard Data Vault column cleaning for hashing."""
-        varchar_type = self._get_type(DataType.Type.VARCHAR)
+        dialect = (self.dialect or "").lower()
 
         # 1. Cast
         col_expr = exp.Column(this=exp.Identifier(this=col_name, quoted=config.quote_identifiers))
-        c = exp.Cast(this=col_expr, to=varchar_type)
+        c = exp.Cast(this=col_expr, to=self._dialect_varchar(dialect))
 
         # 2. Trim (if enabled)
         if use_rtrim:
@@ -215,8 +226,77 @@ class BaseGenerator(ABC):
         dq = exp.Literal.string('"')
         quoted_col = exp.Concat(expressions=[dq, c, exp.Literal.string('"')])
 
+        # Some dialects collapse empty strings to NULL; NULLIF distinguishes "" from ^^
+        if dialect in ("tsql", "fabric", "oracle", "exasol"):
+            quoted_col = exp.Nullif(this=quoted_col, expression=exp.Literal.string('""'))
+
         # 5. NULL → '^^' placeholder so it contributes to the concat string rather than being dropped
         return exp.Coalesce(this=quoted_col, expressions=[exp.Literal.string("^^")])
+
+    def _dialect_hash(self, inner: exp.Expression, algorithm: str) -> exp.Expression:
+        """
+        Returns LOWER(hash_func(inner)) using the hash function appropriate for the active
+        dialect.  Handles databases that lack a native MD5() function.
+
+        Algorithm is 'MD5' or 'SHA256' (from config.hash).
+        """
+        dialect = (self.dialect or "").lower()
+        alg = algorithm.upper()
+        hex_len = 64 if alg in ("SHA256", "SHA2") else 32
+
+        if dialect in ("tsql", "fabric"):
+            # T-SQL / Fabric: LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', inner), 2))
+            tsql_alg = "SHA2_256" if alg == "SHA256" else "MD5"
+            hb = exp.Anonymous(this="HASHBYTES", expressions=[
+                exp.Literal.string(tsql_alg), inner
+            ])
+            converted = exp.Anonymous(this="CONVERT", expressions=[
+                exp.DataType.build(f"VARCHAR({hex_len})"), hb, exp.Literal.number(2)
+            ])
+            return exp.Lower(this=converted)
+
+        elif dialect == "oracle":
+            # Oracle: LOWER(CAST(STANDARD_HASH(inner, 'MD5') AS VARCHAR2(40)))
+            oracle_alg = "SHA256" if alg == "SHA256" else "MD5"
+            sh = exp.Anonymous(this="STANDARD_HASH", expressions=[
+                inner, exp.Literal.string(oracle_alg)
+            ])
+            return exp.Lower(this=exp.Cast(this=sh, to=exp.DataType.build(f"VARCHAR2({hex_len})")))
+
+        elif dialect in ("presto", "trino", "athena"):
+            # These hash functions take VARBINARY — convert string to bytes first, then hex-encode result.
+            # Using exp.Anonymous bypasses sqlglot's auto-transpilation which would add a redundant LOWER.
+            if alg == "SHA256":
+                hash_fn = exp.Anonymous(this="SHA256", expressions=[
+                    exp.Anonymous(this="TO_UTF8", expressions=[inner])
+                ])
+            else:
+                hash_fn = exp.Anonymous(this="MD5", expressions=[
+                    exp.Anonymous(this="TO_UTF8", expressions=[inner])
+                ])
+            return exp.Lower(this=exp.Anonymous(this="TO_HEX", expressions=[hash_fn]))
+
+        elif dialect == "clickhouse":
+            # ClickHouse HEX() returns uppercase hex — wrap with LOWER.
+            # Using exp.Anonymous to avoid sqlglot's auto-transpilation which adds a redundant LOWER.
+            if alg == "SHA256":
+                hash_fn = exp.Anonymous(this="SHA256", expressions=[inner])
+            else:
+                hash_fn = exp.Anonymous(this="MD5", expressions=[inner])
+            return exp.Lower(this=exp.Anonymous(this="HEX", expressions=[hash_fn]))
+
+        else:
+            # Snowflake, Postgres, Redshift, Databricks, DuckDB, Hive, Teradata, Exasol, etc.
+            if alg == "SHA256":
+                h: exp.Expression = exp.SHA2(this=inner, length=exp.Literal.number(256))
+            elif hasattr(exp, alg):
+                h = getattr(exp, alg)(this=inner)
+            else:
+                logging.warning(
+                    f"Hash algorithm '{alg}' not natively supported by sqlglot.exp. Defaulting to MD5."
+                )
+                h = exp.MD5(this=inner)
+            return exp.Lower(this=h)
 
     def _build_hash_expression(
         self, 
@@ -239,8 +319,7 @@ class BaseGenerator(ABC):
         if use_rtrim is None:
             use_rtrim = config.use_trim
 
-        varchar_type = self._get_type(DataType.Type.VARCHAR)
-
+        dialect = (self.dialect or "").lower()
         processed_cols = [self._clean_column(c, use_rtrim=use_rtrim) for c in columns]
         num_cols = len(columns)
 
@@ -254,39 +333,32 @@ class BaseGenerator(ABC):
                 expressions=[exp.Literal.string("||"), *processed_cols]
             )
             null_check_string = "||".join(["^^"] * num_cols)
-        
+
         # case_sensitivity=False → apply UPPER (standard DV behavior); True → preserve case
         if not case_sensitivity:
             concat_block = exp.Upper(this=concat_block)
-            
-        # Remove newlines, tabs, vertical tabs, carriage returns (loop with REGEXP_REPLACE and CHR(i))
+
+        # T-SQL and Redshift lack REGEXP_REPLACE — use plain REPLACE for those dialects
         for char_code in [9, 10, 11, 13]:
-            concat_block = exp.RegexpReplace(
-                this=concat_block,
-                expression=exp.Chr(expressions=[exp.Literal.number(char_code)]),
-                replacement=exp.Literal.string("")
-            )
-        
+            char = exp.Chr(expressions=[exp.Literal.number(char_code)])
+            if dialect in ("tsql", "fabric", "redshift"):
+                concat_block = exp.Replace(
+                    this=concat_block, expression=char, replacement=exp.Literal.string("")
+                )
+            else:
+                concat_block = exp.RegexpReplace(
+                    this=concat_block, expression=char, replacement=exp.Literal.string("")
+                )
+
         # NULLIF(CAST(stripped AS VARCHAR), '^^||^^')
         nullif_block = exp.Nullif(
-             this=exp.Cast(this=concat_block, to=varchar_type),
+             this=exp.Cast(this=concat_block, to=self._dialect_varchar(dialect)),
              expression=exp.Literal.string(null_check_string)
         )
         
-        # Hash Function Selection
         hash_alg = config.hash.upper()
-        if hash_alg == "SHA256":
-            hash_expr = exp.SHA2(this=nullif_block, length=exp.Literal.number(256))
-        elif hasattr(exp, hash_alg):
-            hash_func = getattr(exp, hash_alg)
-            hash_expr = hash_func(this=nullif_block)
-        else:
-            logging.warning(f"Hash algorithm '{hash_alg}' not natively supported by sqlglot.exp. Defaulting to MD5.")
-            hash_expr = exp.MD5(this=nullif_block)
-            
-        hash_expr = exp.Lower(this=hash_expr)
-        
-        # COALESCE(MD5(...), '0000...') — null BK input produces the all-zeros sentinel
-        # Hex length: MD5=32, SHA256=64
         hex_len = 64 if "SHA2" in hash_alg or "SHA256" in hash_alg else 32
-        return exp.Coalesce(this=hash_expr, expressions=[exp.Literal.string('0' * hex_len)])
+        return exp.Coalesce(
+            this=self._dialect_hash(nullif_block, hash_alg),
+            expressions=[exp.Literal.string('0' * hex_len)]
+        )

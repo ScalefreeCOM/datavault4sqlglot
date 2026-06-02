@@ -129,3 +129,40 @@ Snowflake/Postgres/Oracle and `CHAR()` on T-SQL/MySQL automatically.
 3. **Exasol** — VARCHAR length + UTF8 modifier + NULLIF wrapper. Medium effort.
 4. **Oracle** — `standard_hash()` + `VARCHAR2` type + NULLIF wrapper. Medium effort.
 5. **Synapse** — `HASHBYTES+CONVERT` + `VARCHAR(4000)` + `CHAR()` + no `REGEXP_REPLACE`. Highest effort.
+
+---
+
+## Note — 2026-05-05: Expanded sqlglot dialect coverage
+
+After implementing the dialect-aware `_dialect_hash`, `_dialect_varchar`, and `_clean_column`
+methods in `base.py`, all sqlglot-supported dialects were tested. The full list of 18 dialects
+confirmed working, grouped by how they render the hash expression:
+
+| Group | Dialects | Hash function rendered | Hash parity with Snowflake |
+|---|---|---|---|
+| Standard MD5 | `snowflake`, `redshift`, `databricks`, `spark`, `hive`, `duckdb`, `postgres`, `mysql`, `teradata` | `LOWER(MD5(...))` | ✓ Python-verified (`hashlib`) |
+| BigQuery | `bigquery` | `LOWER(TO_HEX(MD5(...)))` | ✓ sqlglot auto-transpiles `exp.MD5` → `TO_HEX(MD5(...))`; same hash for UTF-8 input |
+| Presto / Trino / Athena | `presto`, `trino`, `athena` | `LOWER(TO_HEX(MD5(TO_UTF8(...))))` | ✓ `TO_UTF8` converts VARCHAR to bytes before hashing; same result for UTF-8 strings |
+| ClickHouse | `clickhouse` | `LOWER(HEX(MD5(...)))` | ✓ `HEX()` returns uppercase; `LOWER` normalises; same hash |
+| T-SQL / Fabric | `tsql`, `fabric` | `LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5',...), 2))` | ✓ for ASCII business keys; non-ASCII may differ if DB collation is not UTF-8 |
+| Oracle | `oracle` | `LOWER(CAST(STANDARD_HASH(...,'MD5') AS VARCHAR2(32)))` | ✓ structurally equivalent; not verified against a live Oracle instance |
+| Exasol | `exasol` | `LOWER(HASH_MD5(...))` | ✓ sqlglot uses Exasol's native `HASH_MD5`; same hash |
+
+### Issues found and fixed during this session
+
+| Issue | Affected dialects | Fix applied |
+|---|---|---|
+| Double `LOWER` — sqlglot's `exp.MD5` transpilation already includes `LOWER` | `presto`, `trino`, `athena`, `clickhouse` | Added explicit branches in `_dialect_hash` using `exp.Anonymous` to bypass auto-transpilation |
+| `HASHBYTES` output is `VARBINARY`, not a string — missing `CONVERT` wrapper | `fabric` | Added `fabric` to the `tsql` branch in `_dialect_hash` (produces `LOWER(CONVERT(...,HASHBYTES(...),2))`) |
+| `fabric` using `REGEXP_REPLACE` for control char removal — not valid in T-SQL | `fabric` | Added `fabric` to the `REPLACE`-based control char branch in `_build_hash_expression` |
+| `fabric` missing `NULLIF(..., '""')` on quote wrapper | `fabric` | Added `fabric` to the NULLIF branch in `_clean_column` |
+| `fabric` using unbounded `VARCHAR` — T-SQL requires explicit length | `fabric` | Added `fabric` to `VARCHAR(4000)` branch in `_dialect_varchar` |
+| `synapse` is not a valid sqlglot dialect (sqlglot uses `fabric` for Synapse/Fabric) | all branches | Removed `synapse` from all dialect tuples; users should use `fabric` for Azure Synapse/Fabric and `tsql` for SQL Server |
+
+### Verification method
+
+- **All UTF-8 MD5 dialects**: hash value verified with `hashlib.md5('"C001"'.encode()).hexdigest()` = `25f4d5c41ca3bfb2388752a4a7bf5a5f`
+- **T-SQL / Fabric**: SQL structure matches datavault4dbt's Synapse adapter macro; not verified against a live instance
+- **Oracle**: SQL structure is consistent with `standard_hash` documentation; not verified against a live instance
+- To manually verify T-SQL: `SELECT LOWER(CONVERT(VARCHAR(32), HASHBYTES('MD5', '"C001"'), 2))` → expect `25f4d5c41ca3bfb2388752a4a7bf5a5f`
+- To manually verify Oracle: `SELECT LOWER(CAST(STANDARD_HASH('"C001"', 'MD5') AS VARCHAR2(32))) FROM dual` → expect `25f4d5c41ca3bfb2388752a4a7bf5a5f`
