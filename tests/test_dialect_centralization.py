@@ -38,13 +38,13 @@ def _stage_sql(dialect: str) -> str:
 def _hub_sql(dialect: str, *, incremental: bool = False) -> str:
     binding = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
-        business_keys=["order_id"],
         rsrc_statics=["ERP/ORDERS"] if incremental else None,
     )
     return HubGenerator(
         target_table="hub_order",
         sources=[binding],
         hashkey="hk_order_h",
+        business_keys=["order_id"],
         is_incremental=incremental,
         dialect=dialect,
     ).to_sql()
@@ -54,13 +54,13 @@ def _link_sql(dialect: str, *, incremental: bool = False) -> str:
     binding = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
         hash_key_col="hk_order_customer_l",
-        foreign_hash_keys=["hk_order_h", "hk_customer_h"],
         rsrc_statics=["ERP/ORDERS"] if incremental else None,
     )
     return LinkGenerator(
         target_table="lnk_order_customer",
         sources=[binding],
         link_hash_key="hk_order_customer_l",
+        foreign_hash_keys=["hk_order_h", "hk_customer_h"],
         is_incremental=incremental,
         dialect=dialect,
     ).to_sql()
@@ -84,7 +84,6 @@ def _sat_v1_sql(dialect: str) -> str:
         sat_v0_table="sat_order_details",
         parent_hash_key="hk_order_h",
         hash_diff="hd_order_details",
-        payload=["status", "amount"],
         dialect=dialect,
     ).to_sql()
 

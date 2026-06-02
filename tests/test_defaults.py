@@ -8,13 +8,13 @@ def test_defaults():
 
     source = SourceBinding(
         source=SourceModel(table_name="stg_orders"),
-        business_keys=["o_orderkey"],
     )
 
     generator = HubGenerator(
         target_table="order_h",
         sources=[source],
-        hashkey="hk_order_h"
+        hashkey="hk_order_h",
+        business_keys=["o_orderkey"],
     )
     
     sql = generator.generate_sql().sql()

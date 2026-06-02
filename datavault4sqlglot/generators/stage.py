@@ -62,15 +62,11 @@ class StageGenerator(BaseGenerator):
         target_schema: Optional[str] = None,
         target_database: Optional[str] = None,
         is_incremental: bool = False,
-        end_of_all_times: Optional[str] = None,
-        beginning_of_all_times: Optional[str] = None,
         dialect: Optional[str] = None,
     ) -> None:
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
         self.source_model = source_model
         self.is_incremental = is_incremental
-        self.end_of_all_times = end_of_all_times or config.end_of_all_times
-        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
 
     def generate_sql(self) -> exp.Expression:
         ldts_col = config.ldts_alias
@@ -92,7 +88,7 @@ class StageGenerator(BaseGenerator):
                 .from_(target_exp)
                 .where(
                     exp.column(ldts_col).neq(
-                        exp.Literal.string(self.end_of_all_times)
+                        exp.Literal.string(config.end_of_all_times)
                     )
                 )
             )

@@ -134,7 +134,7 @@ class BaseGenerator(ABC):
         """
         Builds the OR expression used to filter a source CTE against the HWM CTE:
 
-            (rsrc = 'val' AND src_ldts > (SELECT COALESCE(MAX(max_ldts), boa)
+            (rsrc = 'val' AND src_ldts > (SELECT COALESCE(MAX(max_ldts), beginning_of_all_times)
                                            FROM hwm_cte WHERE rsrc_static = 'val'))
             OR ...
 

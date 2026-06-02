@@ -19,7 +19,6 @@ def _gen(**kwargs: object) -> SatelliteV1Generator:
         sat_v0_table="sat_orders",
         parent_hash_key="hk_order",
         hash_diff="hashdiff",
-        payload=["status", "amount"],
     )
     defaults.update(kwargs)
     return SatelliteV1Generator(**defaults)
@@ -38,7 +37,6 @@ def test_sat_v1_default(write_sql):
         sat_v0_table="SAT_ORDER_DETAILS",
         parent_hash_key="HK_ORDER_H",
         hash_diff="HD_ORDER_DETAILS",
-        payload=["ORDER_STATUS", "TOTAL_PRICE", "ORDER_DATE"],
     )
     sql = gen.to_sql()
     write_sql("Default — LEAD window for ledts, is_current flag", sql)
@@ -97,8 +95,9 @@ def test_sat_v1_lead_window_structure(write_sql):
 # ---------------------------------------------------------------------------
 # 5. COALESCE wraps LEAD with end_of_all_times
 # ---------------------------------------------------------------------------
-def test_sat_v1_coalesce_lead_with_eoa(write_sql):
-    sql = _gen(end_of_all_times="9999-12-31").to_sql()
+def test_sat_v1_coalesce_lead_with_end_of_all_times(write_sql):
+    config.end_of_all_times = "9999-12-31"
+    sql = _gen().to_sql()
     write_sql("COALESCE wraps LEAD result with end_of_all_times=9999-12-31", sql)
     assert "COALESCE" in sql
     assert "9999-12-31" in sql
@@ -108,7 +107,8 @@ def test_sat_v1_coalesce_lead_with_eoa(write_sql):
 # 6. Custom end_of_all_times appears in both COALESCE and is_current CASE
 # ---------------------------------------------------------------------------
 def test_sat_v1_custom_end_of_all_times(write_sql):
-    sql = _gen(end_of_all_times="2099-12-31").to_sql()
+    config.end_of_all_times = "2099-12-31"
+    sql = _gen().to_sql()
     write_sql("custom end_of_all_times=2099-12-31 in COALESCE + is_current CASE", sql)
     assert sql.count("2099-12-31") >= 2
 
@@ -117,7 +117,8 @@ def test_sat_v1_custom_end_of_all_times(write_sql):
 # 7. is_current = TRUE when ledts equals end_of_all_times
 # ---------------------------------------------------------------------------
 def test_sat_v1_is_current_logic(write_sql):
-    sql = _gen(end_of_all_times="9999-12-31").to_sql()
+    config.end_of_all_times = "9999-12-31"
+    sql = _gen().to_sql()
     write_sql("is_current CASE: TRUE when ledts = end_of_all_times", sql)
     assert "CASE" in sql
     assert "9999-12-31" in sql

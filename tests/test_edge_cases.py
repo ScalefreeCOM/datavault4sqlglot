@@ -47,16 +47,15 @@ def test_hub_mixed_rsrc_static_filters_only_source_with_statics():
         sources=[
             SourceBinding(
                 source=SourceModel(table_name="STG_SAP"),
-                business_keys=["ID"],
                 rsrc_statics=["SAP/%"],
             ),
             SourceBinding(
                 source=SourceModel(table_name="STG_WEB"),
-                business_keys=["ID"],
                 # No rsrc_statics — the divergence point.
             ),
         ],
         hashkey="HK_ORDER_H",
+        business_keys=["ID"],
         is_incremental=True,
     )
     tree = sqlglot.parse_one(gen.to_sql())
@@ -95,8 +94,9 @@ def test_hub_mixed_rsrc_static_filters_only_source_with_statics():
 def test_hub_empty_business_keys_should_raise():
     gen = HubGenerator(
         target_table="HUB_X",
-        sources=[SourceBinding(source=SourceModel(table_name="STG"), business_keys=[])],
+        sources=[SourceBinding(source=SourceModel(table_name="STG"))],
         hashkey="HK_X",
+        business_keys=[],
     )
     with pytest.raises(ValueError, match="business_keys"):
         gen.generate_sql()

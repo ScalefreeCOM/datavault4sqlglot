@@ -59,6 +59,7 @@ You can override any of these by placing a `config.json` file in your current wo
 The library will automatically load and apply these settings when imported.
 
 **Example `config.json`:**
+
 ```json
 {
   "ldts_alias": "load_date_timestamp",
@@ -68,8 +69,10 @@ The library will automatically load and apply these settings when imported.
 ```
 
 You can also manually load a configuration file from a specific path:
+
 ```python
 from datavault4sqlglot.config import config, load_config
+
 load_config(config, "/path/to/my/custom_config.json")
 ```
 
@@ -91,23 +94,34 @@ StageModel(
 
 ### `SourceModel` — the physical table pointer used by vault generators (Hub, Link, Sat)
 
-Just says where to find the already-staged data: table name, optional schema/database, and which columns are ldts/rsrc if they differ from the config defaults. No transformation logic.
+Just says where to find the already-staged data: table name, optional schema/database, and which
+columns are `ldts`/`rsrc` if they differ from the config defaults. No transformation logic.
 
 ```python
 SourceModel(
-    database="RAW_DB", schema="STAGE", table_name="STG_ORDERS",
-    load_date_col="LOAD_DATE", record_source_col="RECORD_SOURCE",
+    database="RAW_DB",
+    schema="STAGE",
+    table_name="STG_ORDERS",
+    load_date_col="LOAD_DATE",
+    record_source_col="RECORD_SOURCE",
 )
 ```
 
 ### `SourceBinding` — wraps a `SourceModel` with DV-loading intent
 
-Answers what to extract from that staged table for a specific vault entity: which columns are business keys, which are foreign hash keys (for links), what the rsrc_statics are for HWM scoping, etc. A single `SourceModel` can be wrapped in different `SourceBinding`s for different vault entities.
+Answers what to extract from that staged table for a specific vault entity: per-source physical
+`bk_columns` (when they differ from the hub's canonical names), foreign hash keys (for links),
+`rsrc_statics` for HWM scoping, etc. A single `SourceModel` can be wrapped in different
+`SourceBinding`s for different vault entities.
+
+The hub-level *canonical* `business_keys` live on `HubGenerator` itself (not on the binding) —
+every binding into the same hub maps onto that same canonical name set.
 
 ```python
 SourceBinding(
-    source=_SRC_ORDERS_MODEL,   # ← the SourceModel
-    business_keys=["ORDER_ID"],
+    source=_SRC_ORDERS_MODEL,        # the SourceModel
+    bk_columns=["SAP_ORDER_ID"],     # only needed when the source's column
+                                     # name differs from the hub canonical
     rsrc_statics=["ERP/ORDERS"],
 )
 ```

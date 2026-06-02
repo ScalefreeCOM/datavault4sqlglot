@@ -18,6 +18,12 @@ class SatelliteGenerator(BaseGenerator):
     the latest target record per parent hash key — matching datavault4dbt sat_v0.
 
     HWM uses the global MAX(ldts) from the target table (no rsrc_static scoping).
+
+    When ``source_is_single_batch=True`` the LAG/QUALIFY consecutive-hashdiff
+    dedup is skipped: every source row is treated as a distinct snapshot and
+    only filtered against the target's latest hashdiff per parent_hk. This
+    preserves consecutive same-HD rows for new BKs and lets the dedup compare
+    each row individually instead of just the rn=1 candidate.
     """
 
     def __init__(
@@ -31,9 +37,7 @@ class SatelliteGenerator(BaseGenerator):
         payload: Optional[List[str]] = None,
         is_incremental: bool = False,
         disable_hwm: bool = False,
-        additional_columns: Optional[List[str]] = None,
-        end_of_all_times: Optional[str] = None,
-        beginning_of_all_times: Optional[str] = None,
+        source_is_single_batch: bool = False,
         dialect: Optional[str] = None,
     ):
         super().__init__(target_table, target_schema, target_database, dialect=dialect)
@@ -43,9 +47,7 @@ class SatelliteGenerator(BaseGenerator):
         self.payload = payload or []
         self.is_incremental = is_incremental
         self.disable_hwm = disable_hwm
-        self.additional_columns = additional_columns or []
-        self.end_of_all_times = end_of_all_times or config.end_of_all_times
-        self.beginning_of_all_times = beginning_of_all_times or config.beginning_of_all_times
+        self.source_is_single_batch = source_is_single_batch
 
     def generate_sql(self) -> exp.Expression:
         src = self.source_model
@@ -53,7 +55,8 @@ class SatelliteGenerator(BaseGenerator):
         _, hash_diff_col = self._resolve_column_config(self.hash_diff)
         ldts_col = config.ldts_alias
         rsrc_col = config.rsrc_alias
-        boa = self.beginning_of_all_times
+        beginning_of_all_times = config.beginning_of_all_times
+        end_of_all_times = config.end_of_all_times
 
         target_exp = self._get_table_expression(
             self.target_table, self.target_schema, self.target_database
@@ -65,7 +68,6 @@ class SatelliteGenerator(BaseGenerator):
         src_parent_hk = parent_hk_col
         src_hd_src, _ = self._resolve_column_config(self.hash_diff)
         src_payload = self.payload
-        extra_cols = self.additional_columns
         src_ldts = src.load_date_col or ldts_col
         src_rsrc = src.record_source_col or rsrc_col
 
@@ -78,7 +80,6 @@ class SatelliteGenerator(BaseGenerator):
             exp.column(src_parent_hk).as_(parent_hk_col),
             exp.column(src_hd_src).as_(hash_diff_col),
             *[exp.column(p) for p in src_payload],
-            *[exp.column(col) for col in extra_cols],
             exp.column(src_ldts).as_(ldts_col),
             exp.column(src_rsrc).as_(rsrc_col),
         ]
@@ -89,14 +90,12 @@ class SatelliteGenerator(BaseGenerator):
                 exp.select(
                     exp.Coalesce(
                         this=exp.Max(this=exp.column(ldts_col)),
-                        expressions=[exp.Literal.string(boa)],
+                        expressions=[exp.Literal.string(beginning_of_all_times)],
                     )
                 )
                 .from_(target_exp)
                 .where(
-                    exp.column(ldts_col).neq(
-                        exp.Literal.string(self.end_of_all_times)
-                    )
+                    exp.column(ldts_col).neq(exp.Literal.string(end_of_all_times))
                 )
             )
             src_query = src_query.where(
@@ -106,49 +105,63 @@ class SatelliteGenerator(BaseGenerator):
         ctes["src_new"] = src_query
 
         # ---------------------------------------------------------
-        # 2. Deduplication — LAG-based consecutive hashdiff detection
+        # 2. Deduplication
         #
-        # QUALIFY CASE WHEN hash_diff = LAG(hash_diff) OVER (PARTITION BY parent_hk ORDER BY ldts)
-        #              THEN FALSE ELSE TRUE END
+        # Multi-batch source (default): LAG-based consecutive hashdiff detection
+        #   QUALIFY CASE WHEN hash_diff = LAG(hash_diff) OVER (PARTITION BY parent_hk ORDER BY ldts)
+        #                THEN FALSE ELSE TRUE END
+        #   Allows the same hashdiff to reappear after a change (A → B → A),
+        #   unlike PARTITION BY (hk, hd) which would drop the second A entirely.
+        #   When incremental, also adds rn = ROW_NUMBER() per parent_hk so the
+        #   NOT EXISTS check below can restrict comparison to rn=1 only.
         #
-        # Allows the same hashdiff to reappear after a change (A → B → A),
-        # unlike PARTITION BY (hk, hd) which would drop the second A entirely.
-        #
-        # When incremental, also adds rn = ROW_NUMBER() per parent_hk so the
-        # NOT EXISTS check below can restrict comparison to rn=1 only — matching
-        # datavault4dbt sat_v0. Without this, a re-appearing hashdiff (rn>1 after
-        # a change) would be wrongly excluded because it still matches the satellite's
-        # latest entry.
+        # Single-batch source: skipped entirely. Each source row is treated as
+        # a distinct snapshot and forwarded as-is to the change-detection step,
+        # which compares every row to the target's latest hashdiff per BK.
         # ---------------------------------------------------------
-        lag_window = exp.Window(
-            this=exp.Lag(this=exp.column(hash_diff_col)),
-            partition_by=[exp.column(parent_hk_col)],
-            order=exp.Order(
-                expressions=[exp.Ordered(this=exp.column(ldts_col))]
-            ),
-        )
-        qualify_case = (
-            exp.Case()
-            .when(exp.column(hash_diff_col).eq(lag_window), exp.false())
-            .else_(exp.true())
-        )
-        if self.is_incremental:
-            rn_window = exp.Window(
-                this=exp.RowNumber(),
+        if self.source_is_single_batch:
+            dedup_cte_name = "src_new"
+        else:
+            lag_window = exp.Window(
+                this=exp.Lag(this=exp.column(hash_diff_col)),
                 partition_by=[exp.column(parent_hk_col)],
                 order=exp.Order(
                     expressions=[exp.Ordered(this=exp.column(ldts_col))]
                 ),
             )
-            dedup_select = exp.select("*", rn_window.as_("rn"))
-        else:
-            dedup_select = exp.select("*")
-        ctes["deduplicated_numbered_source"] = (
-            dedup_select.from_("src_new").qualify(qualify_case)
-        )
+            qualify_case = (
+                exp.Case()
+                .when(exp.column(hash_diff_col).eq(lag_window), exp.false())
+                .else_(exp.true())
+            )
+            if self.is_incremental:
+                rn_window = exp.Window(
+                    this=exp.RowNumber(),
+                    partition_by=[exp.column(parent_hk_col)],
+                    order=exp.Order(
+                        expressions=[exp.Ordered(this=exp.column(ldts_col))]
+                    ),
+                )
+                dedup_select = exp.select("*", rn_window.as_("rn"))
+            else:
+                dedup_select = exp.select("*")
+            ctes["deduplicated_numbered_source"] = (
+                dedup_select.from_("src_new").qualify(qualify_case)
+            )
+            dedup_cte_name = "deduplicated_numbered_source"
 
         # ---------------------------------------------------------
         # 3. Incremental — NOT EXISTS against latest target record per parent_hk
+        #
+        # Multi-batch: only the first record per parent_hk (rn=1) is checked
+        # against the latest satellite entry. Records with rn>1 always pass —
+        # they represent genuine changes that follow rn=1 within the same batch
+        # and must not be filtered even if their hashdiff happens to match the
+        # current satellite state (e.g. A→B→A pattern across batches).
+        #
+        # Single-batch: there is no rn (no LAG dedup ran), so every source row
+        # is checked individually. Rows whose (parent_hk, hash_diff) matches
+        # the target's latest entry are dropped; everything else lands.
         # ---------------------------------------------------------
         if self.is_incremental:
             latest_target_cte = "latest_entries_in_sat"
@@ -165,36 +178,34 @@ class SatelliteGenerator(BaseGenerator):
                 .qualify(target_window.eq(1))
             )
 
-            # Only the first record per parent_hk (rn=1) is checked against the
-            # latest satellite entry. Records with rn>1 always pass through — they
-            # represent genuine changes that follow rn=1 within the same batch and
-            # must not be filtered even if their hashdiff happens to match the
-            # current satellite state (e.g. A→B→A pattern across batches).
+            not_exists_conditions = [
+                exp.column(parent_hk_col, table=latest_target_cte).eq(
+                    exp.column(parent_hk_col, table=dedup_cte_name)
+                ),
+                exp.column(hash_diff_col, table=latest_target_cte).eq(
+                    exp.column(hash_diff_col, table=dedup_cte_name)
+                ),
+            ]
+            if not self.source_is_single_batch:
+                not_exists_conditions.append(
+                    exp.column("rn", table=dedup_cte_name).eq(
+                        exp.Literal.number(1)
+                    )
+                )
+
             not_exists_sub = (
                 exp.select(exp.Literal.number(1))
                 .from_(latest_target_cte)
-                .where(
-                    exp.and_(
-                        exp.column(parent_hk_col, table=latest_target_cte).eq(
-                            exp.column(parent_hk_col, table="deduplicated_numbered_source")
-                        ),
-                        exp.column(hash_diff_col, table=latest_target_cte).eq(
-                            exp.column(hash_diff_col, table="deduplicated_numbered_source")
-                        ),
-                        exp.column("rn", table="deduplicated_numbered_source").eq(
-                            exp.Literal.number(1)
-                        ),
-                    )
-                )
+                .where(exp.and_(*not_exists_conditions))
             )
             ctes["records_to_insert"] = (
                 exp.select("*")
-                .from_("deduplicated_numbered_source")
+                .from_(dedup_cte_name)
                 .where(exp.Not(this=exp.Exists(this=not_exists_sub)))
             )
             last_cte = "records_to_insert"
         else:
-            last_cte = "deduplicated_numbered_source"
+            last_cte = dedup_cte_name
 
         # ---------------------------------------------------------
         # 4. Final Select + Assemble CTEs
