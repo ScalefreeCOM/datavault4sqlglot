@@ -1,0 +1,25 @@
+id: "4.2.2.1.1"
+title: "sb=false, initial, multi batch: one BK same HD over consecutive batches -> earliest inserted"
+entity: satellite
+mode: initial
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER }
+  parent_hash_key: HK_ORDER_H
+  hash_diff: HD_ORDER
+  payload: [ORDER_STATUS]
+  source_is_single_batch: false
+  source: { database: RAW_DB, schema: STAGE, table: STG_ORDERS,
+            load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE }
+
+input:
+  - table: RAW_DB.STAGE.STG_ORDERS
+    rows:
+      - { HK_ORDER_H: "A", HD_ORDER: "1", ORDER_STATUS: "data", LOAD_DATE: "2026-01-01", RECORD_SOURCE: "ERP" }
+      - { HK_ORDER_H: "A", HD_ORDER: "1", ORDER_STATUS: "data", LOAD_DATE: "2026-01-02", RECORD_SOURCE: "ERP" }
+
+expect:
+  match_mode: set
+  key_columns: [HK_ORDER_H, HD_ORDER, ldts]
+  rows:
+    - { HK_ORDER_H: "A", HD_ORDER: "1", ldts: "2026-01-01" }

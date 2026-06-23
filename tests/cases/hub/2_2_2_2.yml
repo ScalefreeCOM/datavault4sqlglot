@@ -1,0 +1,30 @@
+id: "2.2.2.2"
+title: "Incremental, two sources: existing BK appears in both sources -> no inserts"
+entity: hub
+mode: incremental
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: HUB_ORDER }
+  hashkey: HK_ORDER_H
+  business_keys: [ORDER_ID]
+  sources:
+    - { database: RAW_DB, schema: STAGE, table: STG_SAP_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [SAP_ORDER_ID] }
+    - { database: RAW_DB, schema: STAGE, table: STG_WEB_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [WEB_ORDER_ID] }
+
+current_state:
+  - table: DV.RAW_VAULT.HUB_ORDER
+    rows:
+      - { HK_ORDER_H: "h1", ORDER_ID: "A1", ldts: "2026-01-01", rsrc: "SAP/ORDERS" }
+
+input:
+  - table: RAW_DB.STAGE.STG_SAP_ORDERS
+    rows:
+      - { HK_ORDER_H: "h1", SAP_ORDER_ID: "A1", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "SAP/ORDERS" }
+  - table: RAW_DB.STAGE.STG_WEB_ORDERS
+    rows:
+      - { HK_ORDER_H: "h1", WEB_ORDER_ID: "A1", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "WEB/ORDERS" }
+
+expect:
+  match_mode: empty

@@ -1,0 +1,33 @@
+id: "v1.1.2"
+title: "End-dating partitions per HK -> LEAD does not bleed across hash keys"
+entity: satellite_v1
+mode: initial
+config: { end_of_all_times: "9999-12-31" }
+
+# Two independent hash keys. The LEAD window is PARTITION BY hk, so h1's
+# end-dating chain (01-01 -> 01-10) must NOT pick up h2's 01-03. h2 has a single
+# version, so it stays current. This is the row-level guarantee that the string
+# test ("PARTITION BY" in sql) cannot actually prove.
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_1_S }
+  sat_v0: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_0_S }
+  parent_hash_key: HK_ORDER_H
+  hash_diff: HD_ORDER
+
+current_state:
+  - table: DV.RAW_VAULT.SAT_ORDER_0_S
+    rows:
+      - { HK_ORDER_H: "h1", HD_ORDER: "a1", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+      - { HK_ORDER_H: "h1", HD_ORDER: "a2", ldts: "2026-01-10", rsrc: "ERP", ORDER_STATUS: "DONE" }
+      - { HK_ORDER_H: "h2", HD_ORDER: "b1", ldts: "2026-01-03", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+
+input: []
+
+expect:
+  match_mode: set
+  key_columns: [HK_ORDER_H, ldts, ledts, is_current]
+  rows:
+    - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2026-01-10", is_current: false }
+    - { HK_ORDER_H: "h1", ldts: "2026-01-10", ledts: "9999-12-31", is_current: true }
+    - { HK_ORDER_H: "h2", ldts: "2026-01-03", ledts: "9999-12-31", is_current: true }

@@ -1,0 +1,29 @@
+id: "2.1.2.2"
+title: "Incremental, one source, one BK: new BK over two batches -> earliest is inserted"
+entity: hub
+mode: incremental
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: HUB_ORDER }
+  hashkey: HK_ORDER_H
+  business_keys: [ORDER_ID]
+  sources:
+    - { database: RAW_DB, schema: STAGE, table: STG_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE }
+
+current_state:
+  - table: DV.RAW_VAULT.HUB_ORDER
+    rows:
+      - { HK_ORDER_H: "h_existing", ORDER_ID: "EXIST", ldts: "2026-01-01", rsrc: "ERP/ORDERS" }
+
+input:
+  - table: RAW_DB.STAGE.STG_ORDERS
+    rows:
+      - { HK_ORDER_H: "h_new", ORDER_ID: "NEW", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "ERP/ORDERS" }
+      - { HK_ORDER_H: "h_new", ORDER_ID: "NEW", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "ERP/ORDERS" }
+
+expect:
+  match_mode: set
+  key_columns: [HK_ORDER_H, ldts]
+  rows:
+    - { HK_ORDER_H: "h_new", ldts: "2026-01-03" }

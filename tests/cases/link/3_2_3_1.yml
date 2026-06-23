@@ -1,0 +1,35 @@
+id: "3.2.3.1"
+title: "Initial, two sources, per-source FK aliasing: different physical FHK column names map to canonical names"
+entity: link
+mode: initial
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: LNK_ORDER_CUSTOMER }
+  link_hash_key: HK_LNK_ORDER_CUSTOMER_L
+  foreign_hash_keys: [HK_ORDER_H, HK_CUSTOMER_H]
+  sources:
+    # SAP staging carries the parent hashkeys under HK_SAP_ORDER / HK_SAP_CUSTOMER
+    - { database: RAW_DB, schema: STAGE, table: STG_SAP_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE,
+        fk_columns: [HK_SAP_ORDER, HK_SAP_CUSTOMER] }
+    # WEB staging carries them under HK_WEB_ORDER / HK_WEB_CUSTOMER
+    - { database: RAW_DB, schema: STAGE, table: STG_WEB_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE,
+        fk_columns: [HK_WEB_ORDER, HK_WEB_CUSTOMER] }
+
+input:
+  - table: RAW_DB.STAGE.STG_SAP_ORDERS
+    rows:
+      - { HK_LNK_ORDER_CUSTOMER_L: "lnk_sap", HK_SAP_ORDER: "hk_ord_s", HK_SAP_CUSTOMER: "hk_cust_s", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "SAP/ORDERS" }
+  - table: RAW_DB.STAGE.STG_WEB_ORDERS
+    rows:
+      - { HK_LNK_ORDER_CUSTOMER_L: "lnk_web", HK_WEB_ORDER: "hk_ord_w", HK_WEB_CUSTOMER: "hk_cust_w", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "WEB/ORDERS" }
+
+# The canonical HK_ORDER_H / HK_CUSTOMER_H values prove the positional aliasing
+# worked across both differently-named sources.
+expect:
+  match_mode: set
+  key_columns: [HK_LNK_ORDER_CUSTOMER_L, HK_ORDER_H, HK_CUSTOMER_H]
+  rows:
+    - { HK_LNK_ORDER_CUSTOMER_L: "lnk_sap", HK_ORDER_H: "hk_ord_s", HK_CUSTOMER_H: "hk_cust_s" }
+    - { HK_LNK_ORDER_CUSTOMER_L: "lnk_web", HK_ORDER_H: "hk_ord_w", HK_CUSTOMER_H: "hk_cust_w" }

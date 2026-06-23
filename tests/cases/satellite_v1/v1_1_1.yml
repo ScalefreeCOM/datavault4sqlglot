@@ -1,0 +1,32 @@
+id: "v1.1.1"
+title: "End-dating: two versions of one HK -> ledts = next ldts; latest record is_current"
+entity: satellite_v1
+mode: initial   # ignored by sat_v1 (it rebuilds the end-dated view over the whole sat_v0)
+config: { end_of_all_times: "9999-12-31" }
+
+# sat_v1 reads the sat_v0 table and computes, per parent hash key ordered by ldts:
+#   ledts       = COALESCE(LEAD(ldts) OVER (PARTITION BY hk ORDER BY ldts), end_of_all_times)
+#   is_current  = (ledts = end_of_all_times)
+# These are ROW-LEVEL behaviours that the existing string tests (test_sat_v1.py)
+# cannot verify — this case checks the actual end-dated rows.
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_1_S }
+  sat_v0: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_0_S }
+  parent_hash_key: HK_ORDER_H
+  hash_diff: HD_ORDER
+
+current_state:
+  - table: DV.RAW_VAULT.SAT_ORDER_0_S
+    rows:
+      - { HK_ORDER_H: "h1", HD_ORDER: "d1", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+      - { HK_ORDER_H: "h1", HD_ORDER: "d2", ldts: "2026-01-05", rsrc: "ERP", ORDER_STATUS: "SHIPPED" }
+
+input: []
+
+expect:
+  match_mode: set
+  key_columns: [HK_ORDER_H, ldts, ledts, is_current]
+  rows:
+    - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2026-01-05", is_current: false }
+    - { HK_ORDER_H: "h1", ldts: "2026-01-05", ledts: "9999-12-31", is_current: true }
