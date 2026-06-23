@@ -22,9 +22,16 @@ dependencies = [
 requires-python = ">=3.7"
 
 [project.optional-dependencies]
-test = ["duckdb"]
+# pyyaml is required by the data-driven YAML test runner (tests/cases).
+test = ["duckdb", "pyyaml"]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/datavault4sqlglot"
 Repository = "https://github.com/yourusername/datavault4sqlglot"
 "Bug Tracker" = "https://github.com/yourusername/datavault4sqlglot/issues"
+
+# Scope package discovery to the library only. Without this, setuptools' flat-layout
+# auto-discovery sees the tracked top-level dirs (findings/, temp_sql/, tests/) and
+# fails with "Multiple top-level packages discovered", which breaks `pip install`.
+[tool.setuptools.packages.find]
+include = ["datavault4sqlglot*"]
