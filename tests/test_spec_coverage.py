@@ -1,11 +1,16 @@
 """
 Forced spec<->case coverage check.
 
-This test guarantees every spec-ID has an executable case: it loads the manifest
-(``spec_manifest.yml``) and the
-actual YAML cases, then asserts they match exactly *per entity*. A spec-ID without
-a case, a case without a manifest entry, or a case filed under the wrong entity all
-fail here — so coverage drift can never pass silently.
+Two layers guarantee coverage cannot drift silently:
+
+1. Manifest reconciliation: every spec-ID in ``spec_manifest.yml`` has a YAML case
+   and vice-versa, per entity (a missing case, an orphan case, or a case whose
+   ``entity`` field is wrong all fail).
+2. Physical placement: case files carry no duplicate id, sit in the directory that
+   matches their ``entity``, and are named after their id (``2.1.1.1`` ->
+   ``2_1_1_1.yml``). The set-based reconciliation alone cannot see these — a
+   duplicate id collapses in a set and a misfiled/misnamed file is invisible to
+   it — so they are enforced separately here.
 
 Run with:  python -m pytest tests/test_spec_coverage.py -v
 """
@@ -40,6 +45,45 @@ def _case_ids() -> dict[str, set[str]]:
     return dict(by_entity)
 
 
+def _real_records() -> list[tuple[str, str, str]]:
+    """(relative-path, id, entity) for every case file on disk."""
+    cases_dir = Path(__file__).parent / "cases"
+    records: list[tuple[str, str, str]] = []
+    for path in sorted(cases_dir.glob("**/*.yml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        rel = path.relative_to(cases_dir).as_posix()
+        records.append((rel, data["id"], data["entity"]))
+    return records
+
+
+def _placement_problems(records: list[tuple[str, str, str]]) -> list[str]:
+    """Structural problems the set-based manifest reconciliation cannot see.
+
+    ``records`` is a list of (relative-path, id, entity). Flags any file whose
+    name disagrees with its id, whose directory disagrees with its entity, or any
+    id that appears in more than one file.
+    """
+    problems: list[str] = []
+    by_id: dict[str, list[str]] = defaultdict(list)
+    for rel, case_id, entity in records:
+        p = Path(rel)
+        expected_stem = case_id.replace(".", "_")
+        if p.stem != expected_stem:
+            problems.append(
+                f"{rel}: filename '{p.name}' does not match id '{case_id}' "
+                f"(expected '{expected_stem}.yml')"
+            )
+        if p.parent.name != entity:
+            problems.append(
+                f"{rel}: directory '{p.parent.name}' does not match entity '{entity}'"
+            )
+        by_id[case_id].append(rel)
+    for case_id, paths in sorted(by_id.items()):
+        if len(paths) > 1:
+            problems.append(f"duplicate id '{case_id}' across files: {sorted(paths)}")
+    return problems
+
+
 def test_spec_coverage_matches_manifest():
     manifest = _manifest_ids(_load_manifest())
     cases = _case_ids()
@@ -65,3 +109,39 @@ def test_partial_coverage_entries_reference_real_cases():
     case_ids = {case.id for case in load_all_cases()}
     unknown = sorted(set(partial) - case_ids)
     assert not unknown, f"partial_coverage lists IDs with no case: {unknown}"
+
+
+# ---------------------------------------------------------------------------
+# Physical placement: the manifest check above compares *sets* of ids, so it
+# cannot see a duplicate id, a file in the wrong entity folder, or a filename
+# that disagrees with its id. These checks enforce the "exactly one, correctly
+# filed" promise the set comparison alone does not.
+# ---------------------------------------------------------------------------
+
+def test_case_files_are_well_placed():
+    assert _placement_problems(_real_records()) == []
+
+
+def test_placement_problems_detects_duplicate_id():
+    records = [
+        ("hub/2_1_1_1.yml", "2.1.1.1", "hub"),
+        ("hub/2_1_1_1.yml", "2.1.1.1", "hub"),
+    ]
+    problems = _placement_problems(records)
+    assert any("duplicate id" in p and "2.1.1.1" in p for p in problems)
+
+
+def test_placement_problems_detects_wrong_directory():
+    # stem matches the id, but the file sits under link/ while entity is hub.
+    records = [("link/2_1_1_1.yml", "2.1.1.1", "hub")]
+    problems = _placement_problems(records)
+    assert any("directory" in p for p in problems)
+    assert not any("filename" in p for p in problems)
+
+
+def test_placement_problems_detects_filename_mismatch():
+    # directory matches the entity, but the filename has nothing to do with the id.
+    records = [("hub/banana.yml", "2.1.1.1", "hub")]
+    problems = _placement_problems(records)
+    assert any("filename" in p for p in problems)
+    assert not any("directory" in p for p in problems)
