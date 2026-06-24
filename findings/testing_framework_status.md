@@ -39,7 +39,7 @@ case (and vice-versa), so missing/orphan/misfiled cases fail loudly. Two hub IDs
 
 ## Comparison modes
 
-`set` (default), `exact` (multiset), `subset`, `count`, `empty` — projected onto
+`exact` (default, multiset), `set`, `subset`, `count`, `empty` — projected onto
 `key_columns`. On failure the runner reports the differing rows (count-aware for
 `exact`). A key column that exists in neither the expected rows nor the actual result
 fails loudly rather than passing silently.

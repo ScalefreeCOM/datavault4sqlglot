@@ -28,7 +28,7 @@ input:
 # The canonical HK_ORDER_H / HK_CUSTOMER_H values prove the positional aliasing
 # worked across both differently-named sources.
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_LNK_ORDER_CUSTOMER_L, HK_ORDER_H, HK_CUSTOMER_H]
   rows:
     - { HK_LNK_ORDER_CUSTOMER_L: "lnk_sap", HK_ORDER_H: "hk_ord_s", HK_CUSTOMER_H: "hk_cust_s" }

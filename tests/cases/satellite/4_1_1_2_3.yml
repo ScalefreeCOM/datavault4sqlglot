@@ -24,7 +24,7 @@ input:
       - { HK_ORDER_H: "C", HD_ORDER: "1", ORDER_STATUS: "data", LOAD_DATE: "2026-01-02", RECORD_SOURCE: "ERP" }
 
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_ORDER_H, HD_ORDER, ldts]
   rows:
     - { HK_ORDER_H: "C", HD_ORDER: "1", ldts: "2026-01-02" }

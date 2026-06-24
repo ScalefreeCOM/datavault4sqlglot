@@ -22,7 +22,7 @@ input:
       - { HK_ORDER_H: "h_web", WEB_ORDER_ID: "W1", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "WEB/ORDERS" }
 
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_ORDER_H, ORDER_ID]
   rows:
     - { HK_ORDER_H: "h_sap", ORDER_ID: "S1" }

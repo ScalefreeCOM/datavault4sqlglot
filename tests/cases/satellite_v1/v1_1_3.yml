@@ -22,7 +22,7 @@ current_state:
 input: []
 
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_ORDER_H, ldts, ledts, is_current]
   rows:
     - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2099-12-31", is_current: true }

@@ -67,7 +67,7 @@ input:                        # staging table(s) — the incoming batch
       - { HK_ORDER_H: "h_new", SAP_ORDER_ID: "NEW", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "SAP/ORDERS" }
 
 expect:                       # the assertion
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_ORDER_H, ldts, rsrc]
   rows:
     - { HK_ORDER_H: "h_new", ldts: "2026-01-03", rsrc: "WEB/ORDERS" }
@@ -91,8 +91,8 @@ expect:                       # the assertion
 
 | mode | needs | meaning |
 |---|---|---|
-| `set` (default) | `rows`, `key_columns` | result projected onto `key_columns`, compared as a set (order/dup independent) |
-| `exact` | `rows`, `key_columns` | as `set`, but counts matter (multiset) |
+| `set` | `rows`, `key_columns` | result projected onto `key_columns`, compared as a set (order/dup independent) |
+| `exact` (default) | `rows`, `key_columns` | as `set`, but counts matter (multiset) — a duplicate result row is a mismatch |
 | `subset` | `rows`, `key_columns` | expected rows must be a subset of the result |
 | `count` | `count` | only the number of result rows |
 | `empty` | – | the result must be empty |

@@ -130,7 +130,7 @@ class ExpectSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    match_mode: MatchMode = MatchMode.set
+    match_mode: MatchMode = MatchMode.exact
     key_columns: Optional[list[str]] = None
     rows: Optional[list[dict[str, Any]]] = None
     count: Optional[int] = None
@@ -138,12 +138,22 @@ class ExpectSpec(BaseModel):
     @model_validator(mode="after")
     def _check_required_for_mode(self) -> "ExpectSpec":
         if self.match_mode in (MatchMode.set, MatchMode.exact, MatchMode.subset):
-            if self.rows is None:
+            if not self.rows:
                 raise ValueError(
-                    f"expect.match_mode '{self.match_mode.value}' requires 'rows'"
+                    f"expect.match_mode '{self.match_mode.value}' requires a non-empty "
+                    f"'rows' (use match_mode 'empty' to assert no rows)"
                 )
-        if self.match_mode == MatchMode.count and self.count is None:
-            raise ValueError("expect.match_mode 'count' requires 'count'")
+            if self.key_columns is not None and len(self.key_columns) == 0:
+                raise ValueError(
+                    f"expect.match_mode '{self.match_mode.value}' with 'key_columns: []' "
+                    f"projects every row onto the empty tuple and would pass silently; "
+                    f"omit key_columns or list real columns"
+                )
+        if self.match_mode == MatchMode.count:
+            if self.count is None:
+                raise ValueError("expect.match_mode 'count' requires 'count'")
+            if self.count < 0:
+                raise ValueError("expect.count must be >= 0")
         return self
 
 

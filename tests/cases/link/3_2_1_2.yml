@@ -22,7 +22,7 @@ input:
       - { HK_LNK_ORDER_CUSTOMER_L: "lnk_web", HK_ORDER_H: "ord_w", HK_CUSTOMER_H: "cust_w", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "WEB/ORDERS" }
 
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_LNK_ORDER_CUSTOMER_L]
   rows:
     - { HK_LNK_ORDER_CUSTOMER_L: "lnk_sap" }

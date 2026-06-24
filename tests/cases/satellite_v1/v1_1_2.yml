@@ -8,6 +8,9 @@ config: { end_of_all_times: "9999-12-31" }
 # end-dating chain (01-01 -> 01-10) must NOT pick up h2's 01-03. h2 has a single
 # version, so it stays current. This is the row-level guarantee that the string
 # test ("PARTITION BY" in sql) cannot actually prove.
+# h1's two versions are seeded newest-first (and with hashdiffs running counter
+# to ldts), interleaved with h2, so the chain can only be right if the window
+# orders by ldts within each partition rather than by insertion/hashdiff order.
 
 entity_spec:
   target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_1_S }
@@ -18,14 +21,15 @@ entity_spec:
 current_state:
   - table: DV.RAW_VAULT.SAT_ORDER_0_S
     rows:
-      - { HK_ORDER_H: "h1", HD_ORDER: "a1", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
-      - { HK_ORDER_H: "h1", HD_ORDER: "a2", ldts: "2026-01-10", rsrc: "ERP", ORDER_STATUS: "DONE" }
+      # newest-first, interleaved with h2; hashdiff asc (a1 < a9) is reverse of ldts
+      - { HK_ORDER_H: "h1", HD_ORDER: "a1", ldts: "2026-01-10", rsrc: "ERP", ORDER_STATUS: "DONE" }
       - { HK_ORDER_H: "h2", HD_ORDER: "b1", ldts: "2026-01-03", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+      - { HK_ORDER_H: "h1", HD_ORDER: "a9", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
 
 input: []
 
 expect:
-  match_mode: set
+  match_mode: exact
   key_columns: [HK_ORDER_H, ldts, ledts, is_current]
   rows:
     - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2026-01-10", is_current: false }
