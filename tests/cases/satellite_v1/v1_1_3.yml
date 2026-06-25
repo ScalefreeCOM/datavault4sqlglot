@@ -1,0 +1,28 @@
+id: "v1.1.3"
+title: "Custom end_of_all_times flows into ledts of the last record and the is_current test"
+entity: satellite_v1
+mode: initial
+config: { end_of_all_times: "2099-12-31" }
+
+# A single version for one HK: its ledts must be the configured end_of_all_times
+# (not a hard-coded 9999-12-31) and is_current must be TRUE. Verifies the config
+# value actually reaches both the COALESCE and the is_current CASE at row level.
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_1_S }
+  sat_v0: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_0_S }
+  parent_hash_key: HK_ORDER_H
+  hash_diff: HD_ORDER
+
+current_state:
+  - table: DV.RAW_VAULT.SAT_ORDER_0_S
+    rows:
+      - { HK_ORDER_H: "h1", HD_ORDER: "d1", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+
+input: []
+
+expect:
+  match_mode: exact
+  key_columns: [HK_ORDER_H, ldts, ledts, is_current]
+  rows:
+    - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2099-12-31", is_current: true }

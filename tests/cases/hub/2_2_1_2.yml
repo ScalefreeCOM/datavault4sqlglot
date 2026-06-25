@@ -1,0 +1,29 @@
+id: "2.2.1.2"
+title: "Initial, two sources, two BKs: each source has a different BK -> both inserted"
+entity: hub
+mode: initial
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: HUB_ORDER }
+  hashkey: HK_ORDER_H
+  business_keys: [ORDER_ID]
+  sources:
+    - { database: RAW_DB, schema: STAGE, table: STG_SAP_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [SAP_ORDER_ID] }
+    - { database: RAW_DB, schema: STAGE, table: STG_WEB_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [WEB_ORDER_ID] }
+
+input:
+  - table: RAW_DB.STAGE.STG_SAP_ORDERS
+    rows:
+      - { HK_ORDER_H: "h_sap", SAP_ORDER_ID: "S1", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "SAP/ORDERS" }
+  - table: RAW_DB.STAGE.STG_WEB_ORDERS
+    rows:
+      - { HK_ORDER_H: "h_web", WEB_ORDER_ID: "W1", LOAD_DATE: "2026-01-03", RECORD_SOURCE: "WEB/ORDERS" }
+
+expect:
+  match_mode: exact
+  key_columns: [HK_ORDER_H, ORDER_ID]
+  rows:
+    - { HK_ORDER_H: "h_sap", ORDER_ID: "S1" }
+    - { HK_ORDER_H: "h_web", ORDER_ID: "W1" }

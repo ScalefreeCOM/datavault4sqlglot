@@ -1,0 +1,30 @@
+id: "3.2.2.2"
+title: "Incremental, two sources: existing HK appears in both sources -> no inserts"
+entity: link
+mode: incremental
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: LNK_ORDER_CUSTOMER }
+  link_hash_key: HK_LNK_ORDER_CUSTOMER_L
+  foreign_hash_keys: [HK_ORDER_H, HK_CUSTOMER_H]
+  sources:
+    - { database: RAW_DB, schema: STAGE, table: STG_SAP_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE }
+    - { database: RAW_DB, schema: STAGE, table: STG_WEB_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE }
+
+current_state:
+  - table: DV.RAW_VAULT.LNK_ORDER_CUSTOMER
+    rows:
+      - { HK_LNK_ORDER_CUSTOMER_L: "lnk1", HK_ORDER_H: "ord_a", HK_CUSTOMER_H: "cust_a", ldts: "2026-01-01", rsrc: "SAP/ORDERS" }
+
+input:
+  - table: RAW_DB.STAGE.STG_SAP_ORDERS
+    rows:
+      - { HK_LNK_ORDER_CUSTOMER_L: "lnk1", HK_ORDER_H: "ord_a", HK_CUSTOMER_H: "cust_a", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "SAP/ORDERS" }
+  - table: RAW_DB.STAGE.STG_WEB_ORDERS
+    rows:
+      - { HK_LNK_ORDER_CUSTOMER_L: "lnk1", HK_ORDER_H: "ord_a", HK_CUSTOMER_H: "cust_a", LOAD_DATE: "2026-01-05", RECORD_SOURCE: "WEB/ORDERS" }
+
+expect:
+  match_mode: empty

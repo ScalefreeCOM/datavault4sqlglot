@@ -1,0 +1,39 @@
+id: "v1.1.1"
+title: "End-dating: three versions of one HK -> ledts = next ldts; latest is_current (seed order and hashdiff order both run counter to ldts)"
+entity: satellite_v1
+mode: initial   # ignored by sat_v1 (it rebuilds the end-dated view over the whole sat_v0)
+config: { end_of_all_times: "9999-12-31" }
+
+# sat_v1 reads the sat_v0 table and computes, per parent hash key ordered by ldts:
+#   ledts       = COALESCE(LEAD(ldts) OVER (PARTITION BY hk ORDER BY ldts), end_of_all_times)
+#   is_current  = (ledts = end_of_all_times)
+# The rows are seeded deliberately OUT of chronological order, and the HD_ORDER
+# values are chosen so that sorting by hashdiff yields the *reverse* of the ldts
+# order. The correct end-dating chain therefore matches neither the insertion
+# order nor a hashdiff sort — only an explicit ORDER BY ldts produces it, so a
+# green result proves the window really orders by ldts.
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_1_S }
+  sat_v0: { database: DV, schema: RAW_VAULT, table: SAT_ORDER_0_S }
+  parent_hash_key: HK_ORDER_H
+  hash_diff: HD_ORDER
+
+current_state:
+  - table: DV.RAW_VAULT.SAT_ORDER_0_S
+    rows:
+      # seeded order: middle, latest, earliest (not chronological).
+      # hashdiff asc (hd_a < hd_m < hd_z) -> 01-09, 01-05, 01-01 (reverse of ldts).
+      - { HK_ORDER_H: "h1", HD_ORDER: "hd_m", ldts: "2026-01-05", rsrc: "ERP", ORDER_STATUS: "SHIPPED" }
+      - { HK_ORDER_H: "h1", HD_ORDER: "hd_a", ldts: "2026-01-09", rsrc: "ERP", ORDER_STATUS: "DONE" }
+      - { HK_ORDER_H: "h1", HD_ORDER: "hd_z", ldts: "2026-01-01", rsrc: "ERP", ORDER_STATUS: "OPEN" }
+
+input: []
+
+expect:
+  match_mode: exact
+  key_columns: [HK_ORDER_H, ldts, ledts, is_current]
+  rows:
+    - { HK_ORDER_H: "h1", ldts: "2026-01-01", ledts: "2026-01-05", is_current: false }
+    - { HK_ORDER_H: "h1", ldts: "2026-01-05", ledts: "2026-01-09", is_current: false }
+    - { HK_ORDER_H: "h1", ldts: "2026-01-09", ledts: "9999-12-31", is_current: true }

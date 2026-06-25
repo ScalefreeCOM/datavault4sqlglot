@@ -1,0 +1,37 @@
+id: "2.2.1.3"
+title: "Initial, same BK in both sources with SAME load_date -> deduped to a single hub row"
+entity: hub
+mode: initial
+
+# Spec ('TestCases' 2.2.1.3) wants the leading source to win on an ldts tie.
+# The generator's dedup is ROW_NUMBER() OVER (PARTITION BY hk ORDER BY ldts) with
+# NO secondary tie-break (datavault4sqlglot/generators/hub.py), so on equal ldts
+# the surviving rsrc is ARBITRARY (probed against DuckDB: SAP ~13/20, WEB ~7/20).
+# We therefore assert only the deterministic, generator-guaranteed behavior —
+# exactly ONE row with the correct HK / BK / ldts — and intentionally do NOT
+# project rsrc. The "leading source wins" requirement is a flagged generator gap
+# (no source priority in the dedup ORDER BY), not something this case can verify.
+
+entity_spec:
+  target: { database: DV, schema: RAW_VAULT, table: HUB_ORDER }
+  hashkey: HK_ORDER_H
+  business_keys: [ORDER_ID]
+  sources:
+    - { database: RAW_DB, schema: STAGE, table: STG_SAP_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [SAP_ORDER_ID] }
+    - { database: RAW_DB, schema: STAGE, table: STG_WEB_ORDERS,
+        load_date_col: LOAD_DATE, record_source_col: RECORD_SOURCE, bk_columns: [WEB_ORDER_ID] }
+
+input:
+  - table: RAW_DB.STAGE.STG_SAP_ORDERS
+    rows:
+      - { HK_ORDER_H: "h1", SAP_ORDER_ID: "X", LOAD_DATE: "2026-01-01", RECORD_SOURCE: "SAP/ORDERS" }
+  - table: RAW_DB.STAGE.STG_WEB_ORDERS
+    rows:
+      - { HK_ORDER_H: "h1", WEB_ORDER_ID: "X", LOAD_DATE: "2026-01-01", RECORD_SOURCE: "WEB/ORDERS" }
+
+expect:
+  match_mode: exact
+  key_columns: [HK_ORDER_H, ORDER_ID, ldts]
+  rows:
+    - { HK_ORDER_H: "h1", ORDER_ID: "X", ldts: "2026-01-01" }

@@ -310,7 +310,7 @@ class StageGenerator(BaseGenerator):
 
         if col_name == ldts_col:
             return exp.Literal.string(
-                self.beginning_of_all_times if is_unknown else self.end_of_all_times
+                config.beginning_of_all_times if is_unknown else config.end_of_all_times
             )
         if col_name == rsrc_col:
             return exp.Literal.string(
@@ -318,11 +318,11 @@ class StageGenerator(BaseGenerator):
             )
         if "TIMESTAMP" in d or "DATETIME" in d:
             return exp.Literal.string(
-                self.beginning_of_all_times if is_unknown else self.end_of_all_times
+                config.beginning_of_all_times if is_unknown else config.end_of_all_times
             )
         if d == "DATE":
             return exp.Literal.string(
-                self.beginning_of_all_times if is_unknown else self.end_of_all_times
+                config.beginning_of_all_times if is_unknown else config.end_of_all_times
             )
         if any(t in d for t in ("CHAR", "TEXT", "STRING", "VARCHAR")):
             return exp.Literal.string("(unknown)" if is_unknown else "(error)")
