@@ -10,10 +10,11 @@ readme = "README.md"
 authors = [
   { name = "Scalefree International GmbH", email = "info@scalefree.com" },
 ]
-license = { text = "MIT" }
+keywords = ["data-vault", "sqlglot", "automation"]
+license = {file = "LICENSE"}
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",
 ]
 dependencies = [
@@ -27,7 +28,7 @@ requires-python = ">=3.9"
 test = ["pytest", "duckdb", "pyyaml"]
 
 [project.urls]
-Homepage = "https://github.com/ScalefreeCOM/datavault4sqlglot"
+Homepage = "https://scalefree.com"
 Repository = "https://github.com/ScalefreeCOM/datavault4sqlglot"
 "Bug Tracker" = "https://github.com/ScalefreeCOM/datavault4sqlglot/issues"
 
