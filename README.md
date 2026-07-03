@@ -1,6 +1,6 @@
 # datavault4sqlglot
 
-A Python library for generating Data Vault 2.0 SQL using [sqlglot](https://github.com/tobymao/sqlglot).
+A Python library for generating Data Vault 2 SQL using [sqlglot](https://github.com/tobymao/sqlglot).
 Produces dialect-agnostic SQL for Hubs, Links, Satellites, and Staging layers — no dbt, no live database connection required.
 
 ## Quick Start
@@ -137,3 +137,5 @@ SourceBinding(
 &emsp;&emsp;&emsp;→ `HubGenerator` / `LinkGenerator` / `SatelliteGenerator`
 
 `StageModel` and `SourceModel` are both Pydantic models (validated on construction). `SourceBinding` is a plain dataclass — it's just a lightweight container pairing a `SourceModel` with extraction metadata.
+
+Built by [Scalefree](https://scalefree.com)

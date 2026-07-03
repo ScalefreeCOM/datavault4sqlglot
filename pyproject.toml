@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "datavault4sqlglot"
 version = "0.1.0"
-description = "Data Vault 2.0 SQL generator using sqlglot"
+description = "Data Vault 2 SQL generator using sqlglot"
 readme = "README.md"
 authors = [
   { name = "Scalefree International GmbH", email = "info@scalefree.com" },

@@ -131,7 +131,7 @@ class SatelliteGenerator(BaseGenerator):
             )
             qualify_case = (
                 exp.Case()
-                .when(exp.column(hash_diff_col).eq(lag_window), exp.false())
+                .when(exp.column(hash_diff_col).eq(exp.column("_w")), exp.false())
                 .else_(exp.true())
             )
             if self.is_incremental:
@@ -142,11 +142,19 @@ class SatelliteGenerator(BaseGenerator):
                         expressions=[exp.Ordered(this=exp.column(ldts_col))]
                     ),
                 )
-                dedup_select = exp.select("*", rn_window.as_("rn"))
+                inner_select = (
+                    exp.select("*", rn_window.as_("rn"), lag_window.as_("_w"))
+                    .from_("src_new")
+                )
             else:
-                dedup_select = exp.select("*")
+                inner_select = (
+                    exp.select("*", lag_window.as_("_w"))
+                    .from_("src_new")
+                )
             ctes["deduplicated_numbered_source"] = (
-                dedup_select.from_("src_new").qualify(qualify_case)
+                exp.select("*")
+                .from_(inner_select.subquery("_t"))
+                .where(qualify_case)
             )
             dedup_cte_name = "deduplicated_numbered_source"
 
@@ -172,10 +180,22 @@ class SatelliteGenerator(BaseGenerator):
                     expressions=[exp.Ordered(this=exp.column(ldts_col), desc=True)]
                 ),
             )
-            ctes[latest_target_cte] = (
-                exp.select(exp.column(parent_hk_col), exp.column(hash_diff_col))
+            inner_target = (
+                exp.select(
+                    exp.column(parent_hk_col),
+                    exp.column(hash_diff_col),
+                    target_window.as_("_w"),
+                    exp.column(ldts_col),
+                )
                 .from_(target_exp)
-                .qualify(target_window.eq(1))
+            )
+            ctes[latest_target_cte] = (
+                exp.select(
+                    exp.column(parent_hk_col),
+                    exp.column(hash_diff_col),
+                )
+                .from_(inner_target.subquery("_t"))
+                .where(exp.column("_w").eq(exp.Literal.number(1)))
             )
 
             not_exists_conditions = [
