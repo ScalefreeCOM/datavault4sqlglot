@@ -5,10 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "datavault4sqlglot"
 version = "0.1.0"
-description = "Data Vault 2.0 generator using sqlglot"
+description = "Data Vault 2.0 SQL generator using sqlglot"
+readme = "README.md"
 authors = [
-  { name="Author Name", email="author@example.com" },
+  { name = "Scalefree International GmbH", email = "info@scalefree.com" },
 ]
+license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -17,18 +19,17 @@ classifiers = [
 dependencies = [
     "sqlglot",
     "pydantic",
-    "pytest",
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 # pyyaml is required by the data-driven YAML test runner (tests/cases).
-test = ["duckdb", "pyyaml"]
+test = ["pytest", "duckdb", "pyyaml"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/datavault4sqlglot"
-Repository = "https://github.com/yourusername/datavault4sqlglot"
-"Bug Tracker" = "https://github.com/yourusername/datavault4sqlglot/issues"
+Homepage = "https://github.com/ScalefreeCOM/datavault4sqlglot"
+Repository = "https://github.com/ScalefreeCOM/datavault4sqlglot"
+"Bug Tracker" = "https://github.com/ScalefreeCOM/datavault4sqlglot/issues"
 
 # Scope package discovery to the library only. Without this, setuptools' flat-layout
 # auto-discovery sees the tracked top-level dirs (findings/, temp_sql/, tests/) and
