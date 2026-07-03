@@ -8,13 +8,13 @@
 
 `datavault4sqlglot` is a Python library that ports the logic and functionality of the popular [`datavault4dbt`](https://github.com/ScalefreeCOM/datavault4dbt) package into a standalone, pure-Python solution.
 
-It leverages **sqlglot** to generate syntactically correct, dialect-agnostic SQL for Data Vault 2.0 entities — making DV automation available to the wider Python ecosystem, not just dbt users.
+It leverages **sqlglot** to generate syntactically correct, dialect-agnostic SQL for Data Vault 2 entities — making DV automation available to the wider Python ecosystem, not just dbt users.
 
 ### Goal & Vision
 
 **Key Objectives:**
 - **Expansion**: Enable use cases like standalone ETL scripts, dynamic SQL generation in Airflow/Dagster, or custom platform integrations.
-- **Parity**: Replicate core Data Vault 2.0 patterns (Hubs, Links, Satellites) and advanced features (incremental loading, ghost records, multisource support).
+- **Parity**: Replicate core Data Vault 2 patterns (Hubs, Links, Satellites) and advanced features (incremental loading, ghost records, multisource support).
 
 ### Scope
 
@@ -40,7 +40,7 @@ It leverages **sqlglot** to generate syntactically correct, dialect-agnostic SQL
 
 **Data Flow:**
 1. **Input**: Typed metadata describing source tables, columns, and business keys (Pydantic models or typed dicts).
-2. **Processing**: The `Generator` class applies DV 2.0 patterns and incremental logic (HWM) to build a sqlglot expression tree.
+2. **Processing**: The `Generator` class applies DV 2 patterns and incremental logic (HWM) to build a sqlglot expression tree.
 3. **Output**: A SQL string (compiled for the target dialect) or a sqlglot expression object for further manipulation.
 
 **Conceptual usage example:**
