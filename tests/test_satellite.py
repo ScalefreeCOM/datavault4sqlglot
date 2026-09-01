@@ -40,7 +40,7 @@ def test_sat_v0_full_load(write_sql):
     write_sql("Full Load (LAG dedup, no incremental CTEs)", sql)
     assert "deduplicated_numbered_source" in sql
     assert "LAG" in sql
-    assert "QUALIFY" in sql
+    assert "CASE WHEN" in sql
     assert "latest_entries_in_sat" not in sql
     assert "records_to_insert" not in sql
 
